@@ -1,0 +1,14 @@
+[project]
+name = "voicetype-sidecar"
+version = "0.1.0"
+description = "faster-whisper transcription sidecar for voicetype"
+requires-python = ">=3.10"
+dependencies = [
+    "faster-whisper>=1.1.0",
+    "nvidia-cublas-cu12",
+    "nvidia-cudnn-cu12",
+]
+
+[tool.uv]
+# 锁定到本目录的独立环境，避免污染全局
+package = false

@@ -1,0 +1,70 @@
+// voicetype: global push-to-toggle voice dictation for GNOME Wayland.
+//
+// A warm faster-whisper sidecar (kept in VRAM) transcribes mic audio; the text
+// is pasted into the focused window via a uinput Ctrl+V. Bind `voicetype toggle`
+// to a hotkey: press to start recording, press again to stop + type.
+package main
+
+import (
+	"fmt"
+	"os"
+
+	"voicetype/internal/dictation"
+	"voicetype/internal/setup"
+)
+
+const usage = `voicetype — 全局语音输入 (GNOME Wayland)
+
+用法:
+  voicetype setup            解压并构建 Python 边车环境 (uv sync)
+  voicetype install-service  安装并启动 systemd --user 守护进程
+  voicetype install-hotkey [组合键]
+                             绑定 GNOME 全局快捷键 (默认 <Super>d)
+  voicetype daemon           前台运行守护进程 (通常由 systemd 调用)
+  voicetype toggle           开始/停止录音 (绑定到快捷键的就是它)
+  voicetype doctor           检查依赖与运行状态
+
+首次安装顺序:
+  1. sudo apt install wl-clipboard          # 唯一需要的系统包
+  2. 配置 /dev/uinput 权限 (见 README)
+  3. voicetype setup
+  4. voicetype install-service
+  5. voicetype install-hotkey
+`
+
+func main() {
+	if len(os.Args) < 2 {
+		fmt.Print(usage)
+		os.Exit(1)
+	}
+
+	var err error
+	switch os.Args[1] {
+	case "daemon":
+		err = dictation.RunDaemon()
+	case "toggle":
+		err = dictation.Toggle()
+	case "setup":
+		err = setup.Sidecar()
+	case "install-service":
+		err = setup.Service()
+	case "install-hotkey":
+		binding := "<Super>d"
+		if len(os.Args) > 2 {
+			binding = os.Args[2]
+		}
+		err = setup.Hotkey(binding)
+	case "doctor":
+		setup.Doctor()
+	case "-h", "--help", "help":
+		fmt.Print(usage)
+	default:
+		fmt.Printf("unknown command: %s\n\n%s", os.Args[1], usage)
+		os.Exit(1)
+	}
+
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "error:", err)
+		os.Exit(1)
+	}
+}
