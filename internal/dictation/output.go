@@ -7,8 +7,14 @@ import (
 	"time"
 )
 
-// typeText puts text on the Wayland clipboard (wl-copy) and pastes it into the
-// focused window by injecting Ctrl+V through the uinput virtual keyboard.
+// typeText puts the transcription on the Wayland clipboard (wl-copy) and pastes
+// it into the focused window by injecting Ctrl+V through the uinput keyboard.
+//
+// We deliberately do NOT back up and restore the user's previous clipboard:
+// restoring races with the app reading the pasted selection, which caused
+// pastes to occasionally come out as the old content. The transcription simply
+// stays on the clipboard afterwards, which also serves as a manual-paste
+// fallback if the injected Ctrl+V doesn't land in some app.
 //
 // Clipboard paste (not simulated typing) because keystroke injection can't
 // produce CJK glyphs; the clipboard round-trip reproduces the text exactly.

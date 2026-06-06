@@ -22,12 +22,15 @@ func startRecording() (*recorder, error) {
 	path := f.Name()
 	f.Close()
 
-	cmd := exec.Command("pw-record",
-		"--rate", "16000",
-		"--channels", "1",
-		"--format", "s16",
-		path,
-	)
+	args := []string{"--rate", "16000", "--channels", "1", "--format", "s16"}
+	// Pin a specific input if configured; otherwise PipeWire's default source.
+	// Useful on Intel SOF laptops where the default may be an empty jack mic
+	// while the real internal DMIC is a separate source.
+	if src := os.Getenv("VOICETYPE_SOURCE"); src != "" {
+		args = append(args, "--target", src)
+	}
+	args = append(args, path)
+	cmd := exec.Command("pw-record", args...)
 	cmd.Stderr = os.Stderr
 	if err := cmd.Start(); err != nil {
 		os.Remove(path)

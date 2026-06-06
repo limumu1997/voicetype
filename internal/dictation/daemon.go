@@ -26,7 +26,7 @@ type Daemon struct {
 func RunDaemon() error {
 	cfg := LoadConfig()
 
-	log.Printf("starting sidecar (model=%s device=%s)...", cfg.Model, cfg.Compute)
+	log.Printf("starting sidecar (model=%s device=%s compute=%s)...", cfg.Model, cfg.Device, cfg.Compute)
 	sc, err := startSidecar(cfg)
 	if err != nil {
 		return err
@@ -65,7 +65,6 @@ func RunDaemon() error {
 		os.Exit(0)
 	}()
 
-	notify("voicetype", "✅ 就绪，按热键开始口述")
 	for {
 		conn, err := ln.Accept()
 		if err != nil {
@@ -112,12 +111,12 @@ func (d *Daemon) toggle() string {
 		if err != nil {
 			d.mu.Unlock()
 			log.Printf("start recording: %v", err)
-			notify("voicetype", "❌ 录音失败: "+err.Error())
+			notify("❌ 录音失败: "+err.Error(), 4000)
 			return "error"
 		}
 		d.rec = r
 		d.mu.Unlock()
-		notify("voicetype", "🎤 录音中… 再按一次结束")
+		notify("🎤 录音中… 再按一次结束", 0)
 		return "recording"
 	}
 
@@ -127,11 +126,10 @@ func (d *Daemon) toggle() string {
 	d.rec = nil
 	d.mu.Unlock()
 
-	notify("voicetype", "⏳ 转写中…")
 	wav, err := r.stop()
 	if err != nil {
 		log.Printf("stop recording: %v", err)
-		notify("voicetype", "❌ "+err.Error())
+		notify("❌ "+err.Error(), 4000)
 		return "error"
 	}
 	defer os.Remove(wav)
@@ -139,28 +137,22 @@ func (d *Daemon) toggle() string {
 	text, err := d.sc.transcribe(wav, d.cfg.Lang)
 	if err != nil {
 		log.Printf("transcribe: %v", err)
-		notify("voicetype", "❌ 转写失败: "+err.Error())
+		notify("❌ 转写失败: "+err.Error(), 4000)
 		return "error"
 	}
 	if text == "" {
-		notify("voicetype", "🤔 没听清（无内容）")
+		notify("🤔 没听清（无内容）", 2000)
 		return "empty"
 	}
 	if err := typeText(d.kbd, text); err != nil {
 		log.Printf("paste: %v", err)
-		notify("voicetype", "⚠️ 已转写但粘贴失败（内容已在剪贴板）: "+err.Error())
+		notify("⚠️ 已转写，但粘贴失败，内容已在剪贴板可手动粘贴", 4000)
 		return "copied"
 	}
-	notify("voicetype", "✍️ "+preview(text))
+	// Brief tick replacing the 🎤 indicator; the inserted text is the real
+	// feedback, so it fades quickly to avoid notification spam.
+	notify("✅", 800)
 	return "ok"
-}
-
-func preview(s string) string {
-	r := []rune(s)
-	if len(r) > 40 {
-		return string(r[:40]) + "…"
-	}
-	return s
 }
 
 // Toggle is the client side: connect to the daemon and ask it to toggle.

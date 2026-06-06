@@ -8,7 +8,9 @@ import (
 	"log"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"sync"
+	"syscall"
 )
 
 // sidecar drives the long-running faster-whisper Python process. The model
@@ -40,8 +42,18 @@ func startSidecar(cfg Config) (*sidecar, error) {
 		return nil, fmt.Errorf("sidecar not installed at %s (run `voicetype setup`): %w", dir, err)
 	}
 
-	cmd := exec.Command("uv", "run", "--project", dir, "python", "transcribe.py")
+	// Launch the venv python directly (not via `uv run`) so the model-holding
+	// process is a direct child: Pdeathsig then guarantees it dies with the
+	// daemon and never orphans, which would otherwise pin GPU memory.
+	script := filepath.Join(dir, "transcribe.py")
+	var cmd *exec.Cmd
+	if py := filepath.Join(dir, ".venv", "bin", "python"); fileExists(py) {
+		cmd = exec.Command(py, script)
+	} else {
+		cmd = exec.Command(findUV(), "run", "--project", dir, "python", script)
+	}
 	cmd.Dir = dir
+	cmd.SysProcAttr = &syscall.SysProcAttr{Pdeathsig: syscall.SIGTERM}
 	cmd.Env = append(os.Environ(),
 		"VOICETYPE_MODEL="+cfg.Model,
 		"VOICETYPE_DEVICE="+cfg.Device,
@@ -103,6 +115,24 @@ func (s *sidecar) transcribe(wav, lang string) (string, error) {
 		return "", fmt.Errorf("transcribe: %s", r.Error)
 	}
 	return r.Text, nil
+}
+
+// findUV resolves the uv binary by absolute path so the daemon works under
+// systemd --user, whose PATH excludes ~/.local/bin where uv is usually installed.
+func findUV() string {
+	if p, err := exec.LookPath("uv"); err == nil {
+		return p
+	}
+	home, _ := os.UserHomeDir()
+	if cand := filepath.Join(home, ".local", "bin", "uv"); fileExists(cand) {
+		return cand
+	}
+	return "uv"
+}
+
+func fileExists(p string) bool {
+	_, err := os.Stat(p)
+	return err == nil
 }
 
 func (s *sidecar) close() {

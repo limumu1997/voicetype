@@ -20,6 +20,7 @@ const usage = `voicetype — 全局语音输入 (GNOME Wayland)
   voicetype install-service  安装并启动 systemd --user 守护进程
   voicetype install-hotkey [组合键]
                              绑定 GNOME 全局快捷键 (默认 <Super>d)
+  voicetype uninstall        停用并移除 systemd 服务与 GNOME 快捷键
   voicetype daemon           前台运行守护进程 (通常由 systemd 调用)
   voicetype toggle           开始/停止录音 (绑定到快捷键的就是它)
   voicetype doctor           检查依赖与运行状态
@@ -54,6 +55,8 @@ func main() {
 			binding = os.Args[2]
 		}
 		err = setup.Hotkey(binding)
+	case "uninstall":
+		err = setup.Uninstall()
 	case "doctor":
 		setup.Doctor()
 	case "-h", "--help", "help":
