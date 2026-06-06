@@ -37,15 +37,20 @@ type sidecarResp struct {
 // startSidecar launches `uv run` in the extracted sidecar dir and blocks until
 // the model reports ready.
 func startSidecar(cfg Config) (*sidecar, error) {
-	dir := SidecarDir()
+	// transcribe.py is shared; only the venv differs per backend (whisper and
+	// qwen need separate CUDA stacks, see assets.go).
+	script := filepath.Join(SidecarDir(), "transcribe.py")
+	if _, err := os.Stat(script); err != nil {
+		return nil, fmt.Errorf("sidecar not installed (run `voicetype setup`): %w", err)
+	}
+	dir := BackendDir(cfg.Backend)
 	if _, err := os.Stat(dir); err != nil {
-		return nil, fmt.Errorf("sidecar not installed at %s (run `voicetype setup`): %w", dir, err)
+		return nil, fmt.Errorf("%s backend not installed at %s (run `voicetype setup`): %w", cfg.Backend, dir, err)
 	}
 
 	// Launch the venv python directly (not via `uv run`) so the model-holding
 	// process is a direct child: Pdeathsig then guarantees it dies with the
 	// daemon and never orphans, which would otherwise pin GPU memory.
-	script := filepath.Join(dir, "transcribe.py")
 	var cmd *exec.Cmd
 	if py := filepath.Join(dir, ".venv", "bin", "python"); fileExists(py) {
 		cmd = exec.Command(py, script)
@@ -55,6 +60,7 @@ func startSidecar(cfg Config) (*sidecar, error) {
 	cmd.Dir = dir
 	cmd.SysProcAttr = &syscall.SysProcAttr{Pdeathsig: syscall.SIGTERM}
 	cmd.Env = append(os.Environ(),
+		"VOICETYPE_BACKEND="+cfg.Backend,
 		"VOICETYPE_MODEL="+cfg.Model,
 		"VOICETYPE_DEVICE="+cfg.Device,
 		"VOICETYPE_COMPUTE="+cfg.Compute,

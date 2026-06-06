@@ -10,12 +10,13 @@ import (
 
 // envForService are the session vars the daemon needs to reach the compositor
 // (wl-copy / notify-send). systemd --user does not reliably inherit them, so we
-// bake whatever is present at install time straight into the unit.
+// bake whatever is present at install time straight into the unit. ASR and mic
+// settings deliberately live in config.toml instead, so reinstalling the
+// service never clobbers them.
 var envForService = []string{
 	"WAYLAND_DISPLAY",
 	"DISPLAY",
 	"XDG_CURRENT_DESKTOP",
-	"VOICETYPE_SOURCE", // optional: pin a specific mic if exported at install
 }
 
 // Service writes the systemd --user unit pointing at this binary and enables it.

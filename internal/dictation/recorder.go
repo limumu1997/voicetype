@@ -14,7 +14,7 @@ type recorder struct {
 	path string
 }
 
-func startRecording() (*recorder, error) {
+func startRecording(source string) (*recorder, error) {
 	f, err := os.CreateTemp("", "voicetype-*.wav")
 	if err != nil {
 		return nil, fmt.Errorf("temp file: %w", err)
@@ -26,8 +26,8 @@ func startRecording() (*recorder, error) {
 	// Pin a specific input if configured; otherwise PipeWire's default source.
 	// Useful on Intel SOF laptops where the default may be an empty jack mic
 	// while the real internal DMIC is a separate source.
-	if src := os.Getenv("VOICETYPE_SOURCE"); src != "" {
-		args = append(args, "--target", src)
+	if source != "" {
+		args = append(args, "--target", source)
 	}
 	args = append(args, path)
 	cmd := exec.Command("pw-record", args...)

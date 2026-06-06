@@ -1,7 +1,7 @@
 # voicetype 架构设计文档
 
 > 全局语音输入转文字工具，面向 **GNOME Wayland**（Ubuntu 24.04 验证）。
-> 按一下热键开始录音，再按一下结束 → 本地 faster-whisper（GPU）转写 → 自动粘贴到当前光标处。
+> 按一下热键开始录音，再按一下结束 → 本地 GPU 转写（faster-whisper / Qwen3-ASR）→ 自动粘贴到当前光标处。
 
 本文记录整体架构、运行时行为、关键设计取舍和运维方式，便于日后维护。
 
@@ -42,8 +42,8 @@
                                     ▼           │
                               ┌──────────────────────┐
                               │  sidecar (Python)     │  (daemon 的子进程)
-                              │  faster-whisper        │
-                              │  large-v3-turbo @ GPU │
+                              │  faster-whisper / Qwen │
+                              │  常驻模型 @ GPU        │
                               └──────────────────────┘
 ```
 
@@ -52,7 +52,7 @@
 | 进程 | 实体 | 职责 | 生命周期 |
 |---|---|---|---|
 | **daemon** | Go 二进制 `voicetype daemon` | 监听 socket；管录音、转写编排、粘贴；持有虚拟键盘 | systemd 开机自启，常驻 |
-| **sidecar** | venv Python 跑 `transcribe.py` | 把 Whisper 模型常驻显存，收 wav 路径→返回文字 | daemon 拉起，随 daemon 同生共死（Pdeathsig） |
+| **sidecar** | venv Python 跑 `transcribe.py` | 把转写模型(whisper/qwen)常驻显存，收 wav 路径→返回文字 | daemon 拉起，随 daemon 同生共死（Pdeathsig） |
 | **toggle** | Go 二进制 `voicetype toggle` | 连 socket 发一个 "toggle" 指令 | 每次按键起灭一次 |
 
 > daemon 和 toggle 是**同一个二进制**的不同子命令；sidecar 是 Python。
@@ -84,7 +84,7 @@ case "toggle":  err = dictation.Toggle()     // 发个消息就退的客户端
 开机/登录 → systemd --user 读 voicetype.service → 执行 `voicetype daemon`
                                                         │
 RunDaemon() 依次：                                       ▼
-  ① LoadConfig()        读环境变量（模型 / 设备 / 麦克风源）
+  ① LoadConfig()        读 config.toml（后端 / 模型 / 设备 / 麦克风源）
   ② startSidecar()      exec python → 等模型加载进 GPU(数秒) → 收到 {"ready":true} 才继续
   ③ openKeyboard()      打开 /dev/uinput 建虚拟键盘
   ④ net.Listen(socket)  监听 → 进入 for 循环等 toggle
@@ -129,27 +129,34 @@ sidecar 是"**daemon 豢养的常驻工人**"，不能单独重启；要重启�
 
 ```
 voicetype/
-├── cmd/voicetype/main.go          # CLI 分发：daemon/toggle/setup/install-*/uninstall/doctor
+├── cmd/main.go                    # CLI 分发：daemon/toggle/setup/install-*/uninstall/doctor
 ├── internal/dictation/            # 守护进程与设备 I/O
 │   ├── daemon.go                  #   socket 服务 + toggle 状态机编排
-│   ├── sidecar.go                 #   常驻 Python 进程管理 + JSON 行协议
+│   ├── sidecar.go                 #   常驻 Python 进程管理 + JSON 行协议（按 backend 选 venv）
 │   ├── recorder.go                #   pw-record 录音封装（SIGINT 收尾）
 │   ├── uinput.go                  #   纯 Go /dev/uinput 虚拟键盘（Ctrl+V）
 │   ├── output.go                  #   wl-copy + 触发粘贴
 │   ├── notify.go                  #   notify-send 桌面通知封装
-│   └── paths.go                   #   路径与环境变量配置
+│   └── paths.go                   #   路径 + config.toml 解析（极简 TOML，零依赖）
 ├── internal/setup/                # 安装/卸载/自检
-│   ├── setup.go                   #   解压边车 + uv sync
-│   ├── service.go                 #   生成 systemd --user 单元（烤入会话环境）
+│   ├── setup.go                   #   解压边车 + uv sync（两个 venv）+ 生成默认 config.toml
+│   ├── service.go                 #   生成 systemd --user 单元（只烤入会话环境）
 │   ├── hotkey.go                  #   gsettings 注册 GNOME 自定义快捷键
 │   ├── uninstall.go               #   反向移除服务与快捷键
 │   └── doctor.go                  #   依赖/GPU/麦克风/服务体检
 └── internal/assets/
-    ├── assets.go                  # go:embed
-    └── sidecar/
-        ├── transcribe.py          # faster-whisper 常驻转写循环
-        └── pyproject.toml         # uv 项目依赖
+    ├── assets.go                  # go:embed（transcribe.py + 两个后端的 pyproject）
+    ├── sidecar/
+    │   ├── transcribe.py          # 常驻转写循环；按 VOICETYPE_BACKEND 分派 whisper / qwen
+    │   └── pyproject.toml         # faster-whisper 后端依赖（CUDA-12）
+    └── sidecar-qwen/
+        └── pyproject.toml         # Qwen3-ASR 后端依赖（qwen-asr + torch，CUDA-13）
 ```
+
+> transcribe.py 由两个后端共用；`sidecar/` 与 `sidecar-qwen/` 是**各自独立的 uv 环境**——
+> faster-whisper 要 CUDA-12 cuDNN、torch(qwen) 拉 CUDA-13 cuDNN，两套 cuDNN 同处一个 venv
+> 会在推理时报 `CUDNN_STATUS_SUBLIBRARY_VERSION_MISMATCH`，故必须隔离。daemon 用
+> `BackendDir()` 按 backend 选对应 venv 的 python 去跑那份共用脚本。
 
 ## 7. 关键设计决策与取舍
 
@@ -166,7 +173,11 @@ Wayland 不让向其它窗口注入按键。可选项里：`wtype` 用的虚拟�
 加载 large-v3 进显存要数秒，每次按键重载无法接受。**方案**：daemon 启动时拉起 sidecar，模型常驻显存，之后每次转写秒级返回。
 
 ### 7.4 单二进制交付 —— go:embed + uv
-既要"一个二进制"，又要用最好的转写引擎（Python 的 faster-whisper）。**方案**：把 `transcribe.py` 和 `pyproject.toml` 用 `go:embed` 打进二进制，`voicetype setup` 时自解压到 `~/.local/share/voicetype/sidecar` 并用 **uv** 建独立环境。
+既要"一个二进制"，又要用 Python 的转写引擎。**方案**：把 `transcribe.py` 和各后端 `pyproject.toml` 用 `go:embed` 打进二进制，`voicetype setup` 时自解压到 `~/.local/share/voicetype/` 并用 **uv** 建环境。
+
+### 7.4a 双后端 —— faster-whisper 与 Qwen3-ASR，各用独立 venv
+支持两个转写引擎,由 `VOICETYPE_BACKEND` 选择:`whisper`(faster-whisper,默认)或 `qwen`(Qwen3-ASR 开源权重)。两者**各建一个 uv 环境**(`sidecar/` 与 `sidecar-qwen/`),不能合并:faster-whisper 依赖 CUDA-12 的 `nvidia-cudnn-cu12`,而 torch(qwen)拉 CUDA-13 的 cuDNN,两套 cuDNN 同处一个 venv 推理时会报 `CUDNN_STATUS_SUBLIBRARY_VERSION_MISMATCH`。`transcribe.py` 由两后端共用,daemon 用 `BackendDir()` 按 backend 选对应 venv 的 python 运行它。
+> 显存参考(6GB 卡):whisper `large-v3-turbo` ≈ 2GB,qwen `0.6B` ≈ 1.9GB、`1.7B` ≈ 3.5GB+。
 
 ### 7.5 边车进程管理 —— 直接 exec venv python + Pdeathsig
 - daemon **直接 exec** venv 里的 `python`（而非 `uv run`），让持有显存的进程是 daemon 的直接子进程；设 `Pdeathsig=SIGTERM`，daemon 一死它必死，**杜绝孤儿进程长期占用显存**（曾因此 OOM）。
@@ -179,31 +190,36 @@ Wayland 不让向其它窗口注入按键。可选项里：`wtype` 用的虚拟�
 | stdin/stdout 管道 + JSON 行 | daemon ↔ sidecar | 父子进程天然管道，行分隔 JSON 易实现、串行化请求 |
 
 ### 7.7 麦克风源固定（Intel SOF 坑）
-此机默认输入源是没插设备的耳机口麦克风（录到静音），真正的内置数字麦在 SOF 的 `_6_` 源上。**方案**：① 把系统默认源切到内置麦；② 在服务里用 `VOICETYPE_SOURCE` **按设备名钉死**内置麦，防止默认源被 WirePlumber 重置。
+此机默认输入源是没插设备的耳机口麦克风（录到静音），真正的内置数字麦在 SOF 的 `_6_` 源上。**方案**：① 把系统默认源切到内置麦；② 在 config.toml 用 `source` **按设备名钉死**内置麦（`recorder.go` 经 `cfg.Source` 传给 `pw-record --target`），防止默认源被 WirePlumber 重置。
 
 ### 7.8 systemd 用户服务烤入会话环境
-systemd `--user` 管理器默认**不含** `WAYLAND_DISPLAY` 等图形会话变量，导致 `wl-copy`/`notify-send` 连不上显示。**方案**：`install-service` 在图形终端运行时，把当时环境里的 `WAYLAND_DISPLAY`/`DISPLAY`/`XDG_CURRENT_DESKTOP`/`VOICETYPE_SOURCE` 等**写进 unit 文件**。
+systemd `--user` 管理器默认**不含** `WAYLAND_DISPLAY` 等图形会话变量，导致 `wl-copy`/`notify-send` 连不上显示。**方案**：`install-service` 在图形终端运行时，把当时环境里的 `WAYLAND_DISPLAY`/`DISPLAY`/`XDG_CURRENT_DESKTOP` **写进 unit 文件**。（ASR/麦克风等配置则放在 config.toml,不进 unit——否则重跑 `install-service` 会冲掉,见 §8。）
 
-## 8. 配置（环境变量）
+## 8. 配置（config.toml）
 
-在 `~/.config/systemd/user/voicetype.service` 里用 `Environment=` 设置：
+配置在 **`~/.config/voicetype/config.toml`**（`setup` 会生成带注释的默认文件），daemon 启动时由 `LoadConfig` 读取(`paths.go` 里一个零依赖的极简 TOML 解析)。改完 `systemctl --user restart voicetype` 生效。**刻意不放在 systemd unit 里**——否则重跑 `install-service`(整文件重写)会把这些设置冲掉。
 
-| 变量 | 当前值 | 默认 | 说明 |
-|---|---|---|---|
-| `VOICETYPE_MODEL` | `large-v3-turbo` | `large-v3` | 模型；turbo 多语言、快数倍、省显存；要更准用 `large-v3` |
-| `VOICETYPE_DEVICE` | `cuda` | `cuda` | `cuda` 或 `cpu`（GPU 初始化失败自动回退 CPU/int8） |
-| `VOICETYPE_COMPUTE` | `float16` | `float16` | `float16`/`int8_float16`/`int8`，越往后越省显存 |
-| `VOICETYPE_LANG` | （空，自动） | 空 | 强制语言，如 `zh`、`en` |
-| `VOICETYPE_SOURCE` | 内置麦设备名 | 空(系统默认源) | 钉死录音输入设备 |
+| 键 | 默认 | 说明 |
+|---|---|---|
+| `backend` | `whisper` | 转写引擎:`whisper` / `qwen`,各自独立 venv(见 §7.4a) |
+| `model` | 随 backend | **必须与 backend 匹配**:whisper `large-v3`/`large-v3-turbo`/`medium`/`small`;qwen `Qwen/Qwen3-ASR-0.6B`/`-1.7B` |
+| `device` | `cuda` | `cuda` 或 `cpu`(GPU 初始化失败自动回退 CPU) |
+| `compute` | `float16` | `float16`/`int8_float16`/`int8`,越往后越省显存(仅 whisper) |
+| `lang` | 空(自动) | 强制语言,如 `zh`、`en` |
+| `source` | 空(系统默认) | 钉死录音输入设备(见 §7.7) |
+
+> 同名环境变量 `VOICETYPE_*` 若设置会**覆盖**配置文件,方便前台调试/临时实验(如 `VOICETYPE_MODEL=medium voicetype daemon`)。
 
 ## 9. 系统集成与安装产物
 
 | 位置 | 作用 |
 |---|---|
-| `~/Projects/golang/voicetype/voicetype` | 二进制 |
-| `~/.local/share/voicetype/sidecar/`（含 `.venv` ~2.5G） | 解压的边车 + uv 环境 |
-| `~/.cache/huggingface/hub/models--*` | 下载的 Whisper 模型 |
-| `~/.config/systemd/user/voicetype.service` | 常驻服务定义（含烤入的环境变量） |
+| `~/.local/bin/voicetype` | 二进制（装到 PATH；ExecStart 与热键命令都指它） |
+| `~/.local/share/voicetype/sidecar/`（含 `.venv`） | faster-whisper 边车 + uv 环境 |
+| `~/.local/share/voicetype/sidecar-qwen/`（含 `.venv`） | Qwen3-ASR 边车 uv 环境 |
+| `~/.config/voicetype/config.toml` | 用户配置（后端/模型/设备/语言/麦克风） |
+| `~/.cache/huggingface/hub/models--*` | 下载的模型权重（whisper / qwen） |
+| `~/.config/systemd/user/voicetype.service` | 常驻服务定义（只含会话环境变量，不含 ASR 配置） |
 | `/etc/udev/rules.d/99-uinput.rules` | 把 `/dev/uinput` 设为 `0666`，允许造虚拟键盘 |
 | gsettings `.../custom-keybindings/voicetype/` | `<Alt>v → voicetype toggle` |
 | `/run/user/1000/voicetype.sock` | toggle↔daemon 通信 |
@@ -231,7 +247,7 @@ voicetype uninstall                   # 移除服务与快捷键
 ## 11. 已知限制与未来方向
 
 - **终端粘贴**：注入的 Ctrl+V 在终端无效（终端用 Ctrl+Shift+V）。当前靠"结果留剪贴板，手动粘"兜底。彻底解决需识别前台窗口类型（Wayland 下困难）或同时写主选区(primary)。
-- **流式转写**：现为"录完整段再转"。流式（边说边出字）感知延迟更低，但 faster-whisper 不原生支持、临时结果会跳改、复杂度高。当前用 `large-v3-turbo` 降低单次延迟作为折中。
+- **流式转写**：现为"录完整段再转"。结论是**不值得做真流式**,原因有二:① 模型侧——faster-whisper 不原生支持(只能滑窗 hack、临时结果跳改),Qwen3-ASR 的流式只在 vLLM 后端(重型服务层,与轻量 sidecar 取向冲突);② **输出方式封顶收益**——本工具靠"剪贴板 + 注入一次 Ctrl+V"粘进别人窗口,粘完无句柄可改,且 CJK 无法逐字按键注入,所以即便内部流式,**粘贴仍只能在松手时一次性发生**,拿不到"边说边冒字"的体验。短句场景批量转写已是秒级,够快。若确有长段口述的尾部等待痛点,**中间方案**是按静音(VAD)切段、录音时逐段转、松手时拼好一次粘贴——不动输出模型、不上 vLLM。
 - **对外服务**：sidecar 目前只服务父 daemon。若要给其它程序用，可给 daemon 的 socket 加 `transcribe <文件>` 指令，或开 HTTP `POST /transcribe`，使其成为本机转写服务。
 - **跨桌面**：全局键依赖 GNOME gsettings；KDE/wlroots 等需各自适配。
 ```

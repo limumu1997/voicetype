@@ -26,7 +26,7 @@ type Daemon struct {
 func RunDaemon() error {
 	cfg := LoadConfig()
 
-	log.Printf("starting sidecar (model=%s device=%s compute=%s)...", cfg.Model, cfg.Device, cfg.Compute)
+	log.Printf("starting sidecar (backend=%s model=%s device=%s compute=%s)...", cfg.Backend, cfg.Model, cfg.Device, cfg.Compute)
 	sc, err := startSidecar(cfg)
 	if err != nil {
 		return err
@@ -107,7 +107,7 @@ func (d *Daemon) status() string {
 func (d *Daemon) toggle() string {
 	d.mu.Lock()
 	if d.rec == nil {
-		r, err := startRecording()
+		r, err := startRecording(d.cfg.Source)
 		if err != nil {
 			d.mu.Unlock()
 			log.Printf("start recording: %v", err)

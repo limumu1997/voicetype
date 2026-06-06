@@ -1,0 +1,15 @@
+[project]
+name = "voicetype-sidecar-qwen"
+version = "0.1.0"
+description = "Qwen3-ASR transcription sidecar for voicetype"
+requires-python = ">=3.10"
+# 独立环境：torch 自带 CUDA(cu13)，与 whisper 环境的 nvidia-cu12 cuDNN 隔离，
+# 否则同一 venv 里两条 cuDNN 血统会触发 CUDNN_STATUS_SUBLIBRARY_VERSION_MISMATCH。
+# transformers 版本由 qwen-asr 钉死；torch 需显式声明(qwen-asr 未直接依赖)。
+dependencies = [
+    "qwen-asr>=0.0.6",
+    "torch",
+]
+
+[tool.uv]
+package = false

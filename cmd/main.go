@@ -18,8 +18,8 @@ const usage = `voicetype — 全局语音输入 (GNOME Wayland)
 用法:
   voicetype setup            解压并构建 Python 边车环境 (uv sync)
   voicetype install-service  安装并启动 systemd --user 守护进程
-  voicetype install-hotkey [组合键]
-                             绑定 GNOME 全局快捷键 (默认 <Super>d)
+  voicetype install-hotkey   [组合键]
+                             绑定 GNOME 全局快捷键 (默认 <Alt>v)
   voicetype uninstall        停用并移除 systemd 服务与 GNOME 快捷键
   voicetype daemon           前台运行守护进程 (通常由 systemd 调用)
   voicetype toggle           开始/停止录音 (绑定到快捷键的就是它)
@@ -30,7 +30,7 @@ const usage = `voicetype — 全局语音输入 (GNOME Wayland)
   2. 配置 /dev/uinput 权限 (见 README)
   3. voicetype setup
   4. voicetype install-service
-  5. voicetype install-hotkey
+  5. voicetype install-hotkey <Alt>v
 `
 
 func main() {
@@ -50,7 +50,7 @@ func main() {
 	case "install-service":
 		err = setup.Service()
 	case "install-hotkey":
-		binding := "<Super>d"
+		binding := "<Alt>v"
 		if len(os.Args) > 2 {
 			binding = os.Args[2]
 		}

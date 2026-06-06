@@ -5,6 +5,7 @@ import (
 	"net"
 	"os"
 	"os/exec"
+	"strings"
 
 	"voicetype/internal/dictation"
 )
@@ -14,6 +15,8 @@ func Doctor() {
 	fmt.Println("voicetype doctor")
 	fmt.Println("================")
 
+	cfg := dictation.LoadConfig()
+
 	checkCmd("pw-record", "录音 (PipeWire)")
 	checkCmd("wl-copy", "剪贴板 (wl-clipboard)")
 	checkCmd("notify-send", "桌面通知 (libnotify)")
@@ -21,8 +24,24 @@ func Doctor() {
 
 	checkUinput()
 	checkGPU()
-	checkSidecar()
+	checkConfig(cfg)
+	checkSidecar(cfg)
 	checkDaemon()
+}
+
+func checkConfig(cfg dictation.Config) {
+	lang := cfg.Lang
+	if lang == "" {
+		lang = "auto"
+	}
+	ok(fmt.Sprintf("config       backend=%s model=%s lang=%s", cfg.Backend, cfg.Model, lang))
+	// The single `model` key must match the backend (whisper vs qwen names).
+	isQwenName := strings.HasPrefix(cfg.Model, "Qwen")
+	if cfg.Backend == "qwen" && !isQwenName {
+		warn("config       backend=qwen 但 model 不是 Qwen/... — 会加载失败")
+	} else if cfg.Backend != "qwen" && isQwenName {
+		warn("config       backend=whisper 但 model 是 qwen 名 — 会加载失败")
+	}
 }
 
 func checkCmd(name, desc string) {
@@ -53,13 +72,13 @@ func checkGPU() {
 	ok("GPU          " + trim(string(out)))
 }
 
-func checkSidecar() {
-	dir := dictation.SidecarDir()
+func checkSidecar(cfg dictation.Config) {
+	dir := dictation.BackendDir(cfg.Backend)
 	if _, err := os.Stat(dir + "/.venv"); err != nil {
-		bad("sidecar      未安装环境 — 运行 `voicetype setup`")
+		bad(fmt.Sprintf("sidecar      %s 后端环境未安装 (%s) — 运行 `voicetype setup`", cfg.Backend, dir))
 		return
 	}
-	ok("sidecar      " + dir)
+	ok(fmt.Sprintf("sidecar      %s @ %s", cfg.Backend, dir))
 }
 
 func checkDaemon() {
