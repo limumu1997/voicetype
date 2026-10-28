@@ -19,6 +19,7 @@ go vet ./...                            # there are no tests in this repo
 ./voicetype toggle                       # trigger start/stop manually (same as the hotkey)
 ./voicetype doctor                       # dependency / GPU / mic / hotwords / focus / service self-check
 ./voicetype config                       # open the settings web UI (served by the daemon)
+./voicetype version                      # print the version (internal/dictation/version.go; bump it per release + git tag vX.Y.Z)
 journalctl --user -u voicetype -f        # daemon logs (first place to look)
 systemctl --user restart voicetype       # apply config changes (restarts sidecar too)
 ```
@@ -56,6 +57,8 @@ The whole design works around two Wayland security restrictions; preserve these 
 - **Sidecar load is retried** (5s, 15s; 3 attempts) before the daemon settles into the error state; a ready notice reports the load time, and a `voicetype.sock.recovering` marker turns it into a "recovered" notice after a crash restart.
 - **Fun-ASR-Nano needs VAD segmentation** (`vad` key, default `fsmn-vad`, passed as `VOICETYPE_VAD`): unsegmented it truncates audio past ~30s and OOMs at 5 min; with `vad_model` + `max_single_segment_time=30000` long audio is complete and peak VRAM stays ~3.6G regardless of length. funasr joins segments with spaces; the sidecar strips whitespace between CJK characters only.
 - **Output tidy (`_tidy` in transcribe.py, all backends)**: besides the CJK-gap strip, runs of ≥2 single capital letters/digits are merged — spelling letter by letter comes back space-separated ("H T T P", "E S P 3 2" → "HTTP", "ESP32"; the model capitalizes spelled letters). A run needs at least one letter, so pure digit runs ("第 3 4 名") and lone letters ("Plan B", "选 A 还是 B") are left alone.
+- **GPaste cleanup** (`gpaste.go`): after a paste that surely landed (focus editable/terminal), the entry is deleted from GPaste's history after 1.5s. Deleting the current entry makes GPaste put the previous item back on the clipboard — effectively a clipboard restore — so the delay is what keeps it from racing the target app's read (the reason clipboard restore was once removed). Unknown/none focus keeps the entry as the fallback.
+- **Replacement rules** (`text.go`, `~/.config/voicetype/replace.txt`, editable in the web UI): `from => to` per line, applied in Go after transcription; **longest match wins, left to right**, so an identity rule shields a word (`他 => 它` + `其他 => 其他` keeps 其他). Re-read on mtime. This replaced a hardcoded `ta` pronoun dropdown — keep homophone fixes as user rules, not code. Don't use hotwords for this: a one-character hotword biases every homophone.
 - Recordings auto-stop after `maxRecording` (5 min) so a forgotten second press can't grow the WAV until it blows the 120s transcribe timeout.
 - Fun-ASR-Nano is built into funasr ≥ 1.4.16: load it **without** `trust_remote_code` (with it, funasr logs a spurious "Loading remote code failed: model" on every start).
 - Don't enable a11y globally (`org.a11y.Status.IsEnabled`) to make Chrome/Electron visible to the focus probe — it slows every Chromium app.

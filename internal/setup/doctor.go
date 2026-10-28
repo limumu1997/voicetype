@@ -12,7 +12,7 @@ import (
 
 // Doctor prints the status of every runtime dependency so problems are obvious.
 func Doctor() {
-	fmt.Println("voicetype doctor")
+	fmt.Println("voicetype doctor  (v" + dictation.Version + ")")
 	fmt.Println("================")
 
 	cfg := dictation.LoadConfig()

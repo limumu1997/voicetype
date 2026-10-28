@@ -65,7 +65,7 @@
 <body>
 <main>
   <header>
-    <h1>voicetype</h1>
+    <h1>voicetype <span id="version" class="msg"></span></h1>
     <span id="status" class="pill loading">连接中…</span>
     <span id="gpu" class="gpu"></span>
   </header>
@@ -147,6 +147,16 @@
     <p class="hint">每行一个词，# 开头是注释。保存后下次转写立即生效，不用重启。热词的偏置作用很强，写错的词会把本来认对的结果带偏，宁缺毋滥。</p>
   </section>
 
+  <section class="card">
+    <h2>替换规则 <span id="rpCount" class="msg"></span></h2>
+    <textarea id="replace" spellcheck="false"></textarea>
+    <div class="row">
+      <button id="saveReplace">保存规则</button>
+      <span id="rpMsg" class="msg"></span>
+    </div>
+    <p class="hint">识别出来后再按规则改字，专治模型老是认错的同音字。每行一条 <code>原文 =&gt; 替换</code>，# 开头是注释，保存后下次转写生效。<b>长的规则优先</b>：写 <code>他 =&gt; 它</code> 再写 <code>其他 =&gt; 其他</code>，「其他」就会原样保留，其余的「他」都变成「它」。</p>
+  </section>
+
   <div class="row">
     <button id="save">保存配置</button>
     <button id="saveRestart" class="primary">保存并重启</button>
@@ -180,11 +190,16 @@ function say(el, text, kind = "") {
   el.className = "msg " + kind;
 }
 
+function countRules(text) {
+  return text.split("\n").filter((l) => { const [from, to] = l.split("#")[0].split("=>"); return to !== undefined && from.trim(); }).length;
+}
+
 function countHotwords(text) {
   return text.split("\n").filter((l) => l.split("#")[0].trim()).length;
 }
 
 function renderStatus(s) {
+  if (s.version) $("version").textContent = "v" + s.version;
   const pill = $("status");
   pill.textContent = STATUS[s.status] || s.status;
   pill.className = "pill " + s.status;
@@ -222,7 +237,9 @@ function renderForm(s) {
 
   $("hotwords").value = s.hotwords;
   $("hwCount").textContent = `${countHotwords(s.hotwords)} 个`;
-  $("paths").textContent = `${s.configPath} · ${s.hotwordsPath}`;
+  $("replace").value = s.replace;
+  $("rpCount").textContent = `${countRules(s.replace)} 条`;
+  $("paths").textContent = `${s.configPath} · ${s.hotwordsPath} · ${s.replacePath}`;
 }
 
 function formValues() {
@@ -303,6 +320,18 @@ $("saveHotwords").onclick = async () => {
     say($("hwMsg"), "已保存，下次转写生效", "ok");
   } catch (e) {
     say($("hwMsg"), e.message, "bad");
+  }
+};
+$("replace").addEventListener("input", () => {
+  $("rpCount").textContent = `${countRules($("replace").value)} 条`;
+  say($("rpMsg"), "未保存");
+});
+$("saveReplace").onclick = async () => {
+  try {
+    await api("/api/replace", { text: $("replace").value });
+    say($("rpMsg"), "已保存，下次转写生效", "ok");
+  } catch (e) {
+    say($("rpMsg"), e.message, "bad");
   }
 };
 $("testBtn").onclick = async () => {

@@ -33,6 +33,7 @@ type Daemon struct {
 // can show the error and fix the config.
 func RunDaemon() error {
 	cfg := LoadConfig()
+	log.Printf("voicetype %s starting", Version)
 
 	kbd, err := openKeyboard()
 	if err != nil {
@@ -244,6 +245,7 @@ func (d *Daemon) toggle() string {
 		notify("🤔 没听清（无内容）", 2000)
 		return "empty"
 	}
+	text = applyRules(text, loadRules())
 	focus := <-focusc
 	log.Printf("transcribed %d chars, focus=%s", len([]rune(text)), focus)
 	pasted, err := typeText(d.kbd, text, focus)
@@ -256,6 +258,11 @@ func (d *Daemon) toggle() string {
 		log.Printf("no input focused; left on clipboard")
 		notify("📋 没有输入框，已存入剪贴板（GPaste 可找回）", 3000)
 		return "copied"
+	}
+	// Keep GPaste's history clean, but only where the paste surely landed:
+	// with an unknown focus the history entry is the fallback.
+	if focus == FocusEditable || focus == FocusTerminal {
+		go forgetPasted(text)
 	}
 	// No success notification: the pasted text and the stop cue are the
 	// feedback, and the recording banner is already gone.

@@ -56,6 +56,9 @@ func Sidecar(which string) error {
 	if err := writeHotwordsTemplate(); err != nil {
 		return err
 	}
+	if err := writeReplaceTemplate(); err != nil {
+		return err
+	}
 	fmt.Println("Note: the model weights themselves download on first start (unless model is a local dir).")
 	return nil
 }
@@ -110,6 +113,27 @@ func writeHotwordsTemplate() error {
 		return err
 	}
 	fmt.Println("wrote hotwords template", path)
+	return nil
+}
+
+// writeReplaceTemplate drops a commented replace.txt if none exists; rules
+// are opt-in, so the template only shows the syntax.
+func writeReplaceTemplate() error {
+	path := dictation.ReplacePath()
+	if _, err := os.Stat(path); err == nil {
+		return nil
+	}
+	const tmpl = `# voicetype 替换规则 — 识别出来后按规则改字，治模型老认错的同音字
+# 每行一条: 原文 => 替换    # 开头为注释；保存后下次转写生效
+# 长的规则优先，所以"原样保留"的规则能保护词组。例：主要跟电脑/AI 说话时把"他"写成"它"
+#   他 => 它
+#   其他 => 其他
+#   吉他 => 吉他
+`
+	if err := os.WriteFile(path, []byte(tmpl), 0o644); err != nil {
+		return err
+	}
+	fmt.Println("wrote replace rules template", path)
 	return nil
 }
 

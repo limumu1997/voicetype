@@ -31,7 +31,8 @@ func (d *Daemon) serveWeb(addr string) error {
 	})
 	mux.HandleFunc("GET /api/state", d.apiState)
 	mux.HandleFunc("POST /api/config", d.apiConfig)
-	mux.HandleFunc("POST /api/hotwords", d.apiHotwords)
+	mux.HandleFunc("POST /api/hotwords", saveTextFile(HotwordsPath))
+	mux.HandleFunc("POST /api/replace", saveTextFile(ReplacePath))
 	mux.HandleFunc("POST /api/restart", d.apiRestart)
 	mux.HandleFunc("POST /api/test", d.apiTest)
 	mux.HandleFunc("POST /api/sound", d.apiSound)
@@ -83,6 +84,7 @@ func (d *Daemon) apiState(w http.ResponseWriter, r *http.Request) {
 	}
 	d.mu.Unlock()
 	hotwords, _ := os.ReadFile(HotwordsPath())
+	replace, _ := os.ReadFile(ReplacePath())
 	writeJSON(w, map[string]any{
 		"status":        d.status(),
 		"error":         loadErr,
@@ -90,9 +92,12 @@ func (d *Daemon) apiState(w http.ResponseWriter, r *http.Request) {
 		"saved":         saved,
 		"restartNeeded": restart,
 		"hotwords":      string(hotwords),
+		"replace":       string(replace),
+		"replacePath":   ReplacePath(),
 		"sources":       listSources(),
 		"gpu":           gpuMemory(),
 		"systemd":       os.Getenv("INVOCATION_ID") != "",
+		"version":       Version,
 		"configPath":    ConfigPath(),
 		"hotwordsPath":  HotwordsPath(),
 	})
@@ -120,32 +125,37 @@ func (d *Daemon) apiConfig(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
+	d.mu.Lock()
 	if v, ok := values["sound"]; ok {
-		d.mu.Lock()
 		d.sound = v
-		d.mu.Unlock()
 	}
+	d.mu.Unlock()
 	log.Printf("config saved from web ui")
 	d.apiState(w, r)
 }
 
-func (d *Daemon) apiHotwords(w http.ResponseWriter, r *http.Request) {
-	var in struct{ Text string }
-	if err := json.NewDecoder(r.Body).Decode(&in); err != nil {
-		http.Error(w, err.Error(), http.StatusBadRequest)
-		return
+// saveTextFile returns a handler that atomically writes the posted text to
+// the file at path(). Hotwords and replacement rules are both re-read on
+// change, so saving is all it takes to apply them.
+func saveTextFile(path func() string) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		var in struct{ Text string }
+		if err := json.NewDecoder(r.Body).Decode(&in); err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+		text := strings.TrimRight(in.Text, "\n") + "\n"
+		p := path()
+		err := os.WriteFile(p+".tmp", []byte(text), 0o644)
+		if err == nil {
+			err = os.Rename(p+".tmp", p)
+		}
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		writeJSON(w, map[string]any{"ok": true})
 	}
-	text := strings.TrimRight(in.Text, "\n") + "\n"
-	path := HotwordsPath()
-	err := os.WriteFile(path+".tmp", []byte(text), 0o644)
-	if err == nil {
-		err = os.Rename(path+".tmp", path)
-	}
-	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
-		return
-	}
-	writeJSON(w, map[string]any{"ok": true})
 }
 
 // apiRestart restarts the service through systemd so the new config is read.

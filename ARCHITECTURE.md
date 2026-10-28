@@ -239,6 +239,14 @@ gnome-shell(50.x)**不认** notify-osd 的 `x-canonical-private-synchronous` 提
 ### 7.15 wl-copy 不能接管道
 `wl-copy` 会 fork 一个后台子进程持有剪贴板内容,它继承父进程的 stdout/stderr。若用 `CombinedOutput` 之类把输出接成管道,`Wait` 要等管道关闭——也就是等**别的程序接管剪贴板**才返回。GPaste 只记录不接管,于是粘贴键迟迟发不出,等你下次复制别的东西时才补发到不知哪个窗口。**方案**:stdout 丢弃、stderr 直接给 daemon 自己的 fd(journal),`Run` 在父 wl-copy 退出时即返回。
 
+### 7.16 GPaste 历史 —— 粘上了就删,没粘上才留
+GPaste 会记录每一次剪贴板变化,而剪贴板只是粘贴的载体,每句转写都堆进历史会很乱。**方案**(`gpaste.go`):只在**确定粘上**(焦点 editable/terminal)时,等 1.5s 后在 GPaste 最新 5 条里找内容完全相同的那条,`gpaste-client delete <uuid>`;focus 为 unknown(可能没粘上)或 none(没粘)时保留,当兜底。**实测**:删除当前条目时 GPaste 会把**上一条放回剪贴板**——等于恢复了用户原来的剪贴板,这正是当初去掉"剪贴板恢复"的竞态来源(恢复得太早,目标程序粘出旧内容)。所以必须延迟:程序在收到按键的几毫秒内就读完剪贴板,1.5s 余量足够。GPaste 没装或无响应(实测遇到过卡死)时每条命令 3s 超时,静默放弃。
+
+### 7.17 替换规则 —— 同音字歧义的通用解法
+ASR 遇到同音字只能靠猜,对个人场景会系统性猜错:听到 "tā" 默认写「他」,而本工具主要用来跟电脑、AI 说话,指代的多是程序和模型(「它」)。这类问题以后还会遇到别的字,所以不为单个字写死逻辑(最初做过 `ta` 下拉框 + 硬编码例外,已弃用),而是做成**用户可编辑的规则表**:`~/.config/voicetype/replace.txt`(设置页可编辑),每行 `原文 => 替换`,`#` 注释,替换为空即删除。
+
+**匹配语义:每个位置取最长匹配,从左到右一遍扫完**(`text.go`)。这样"原样保留"的恒等规则就能保护词组,不需要另一套例外语法:`他 => 它` + `其他 => 其他` 时,「其他」整体命中长规则原样输出,其余「他」(含「他们」)变「它」。规则在 Go 侧应用(转写后、粘贴前),文件按 mtime 重读,保存即生效。**不用热词实现**:单字热词偏置会扩散到所有同音字,风险不可控(§7.12)。
+
 ## 8. 配置（config.toml）
 
 配置在 **`~/.config/voicetype/config.toml`**（`setup` 会生成带注释的默认文件），daemon 启动时由 `LoadConfig` 读取(`paths.go` 里一个零依赖的极简 TOML 解析)。改完 `systemctl --user restart voicetype` 生效。**刻意不放在 systemd unit 里**——否则重跑 `install-service`(整文件重写)会把这些设置冲掉。
@@ -250,6 +258,7 @@ gnome-shell(50.x)**不认** notify-osd 的 `x-canonical-private-synchronous` 提
 | `device` | `cuda` | `cuda` 或 `cpu`(GPU 初始化失败自动回退 CPU) |
 | `compute` | `float16` | `float16`/`int8_float16`/`int8`,越往后越省显存(仅 whisper) |
 | `lang` | 空(自动) | 强制语言,如 `zh`、`en` |
+| `vad` | `fsmn-vad` | 仅 funasr:长录音按停顿切成 ≤30s 的段(见 §7.12a),可填本地目录,`off` 关闭 |
 | `source` | 空(系统默认) | 钉死录音输入设备(见 §7.7);设备改名后会静默回退默认源,用设置页试录排查 |
 | `sound` | `crystal` | 提示音风格:清亮 `halo`/`crystal`/`pulse`,低沉 `warp`/`nebula`/`sonar`,`off` 关闭(见 §7.13) |
 | `web` | `127.0.0.1:27865` | 设置页地址,`off` 关闭(见 §7.11);避开 Gradio 默认的 7860+ 与代理常用的 7890 |

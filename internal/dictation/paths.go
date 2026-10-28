@@ -76,6 +76,12 @@ func HotwordsPath() string {
 	return filepath.Join(ConfigDir(), "hotwords.txt")
 }
 
+// ReplacePath holds the user's `from => to` replacement rules (see text.go),
+// re-read whenever it changes.
+func ReplacePath() string {
+	return filepath.Join(ConfigDir(), "replace.txt")
+}
+
 // Config is the runtime configuration. Values come from config.toml, and any
 // matching VOICETYPE_* env var overrides the file (handy for one-off runs).
 type Config struct {

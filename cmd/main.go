@@ -26,6 +26,7 @@ const usage = `voicetype — 全局语音输入 (GNOME Wayland)
   voicetype toggle           开始/停止录音 (绑定到快捷键的就是它)
   voicetype doctor           检查依赖与运行状态
   voicetype config           在浏览器打开设置页 (守护进程需在运行)
+  voicetype version          显示版本号
 
 首次安装顺序:
   1. sudo apt install wl-clipboard          # 唯一需要的系统包
@@ -63,6 +64,8 @@ func main() {
 		setup.Doctor()
 	case "config":
 		err = setup.OpenConfig()
+	case "version", "-v", "--version":
+		fmt.Println("voicetype", dictation.Version)
 	case "-h", "--help", "help":
 		fmt.Print(usage)
 	default:
