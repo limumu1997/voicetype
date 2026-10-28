@@ -25,12 +25,13 @@ const (
 
 // Linux input event constants.
 const (
-	evSyn       = 0x00
-	evKey       = 0x01
-	synReport   = 0x00
-	keyLeftCtrl = 29
-	keyV        = 47
-	busUSB      = 0x03
+	evSyn        = 0x00
+	evKey        = 0x01
+	synReport    = 0x00
+	keyLeftCtrl  = 29
+	keyLeftShift = 42
+	keyV         = 47
+	busUSB       = 0x03
 )
 
 type uinputUserDev struct {
@@ -72,7 +73,7 @@ func openKeyboard() (*virtualKeyboard, error) {
 		f.Close()
 		return nil, fmt.Errorf("set evbit syn: %w", err)
 	}
-	for _, k := range []uintptr{keyLeftCtrl, keyV} {
+	for _, k := range []uintptr{keyLeftCtrl, keyLeftShift, keyV} {
 		if err := ioctl(fd, uiSetKeyBit, k); err != nil {
 			f.Close()
 			return nil, fmt.Errorf("set keybit %d: %w", k, err)
@@ -103,17 +104,25 @@ func openKeyboard() (*virtualKeyboard, error) {
 	return &virtualKeyboard{f: f}, nil
 }
 
-// pasteShortcut presses Ctrl+V.
-func (k *virtualKeyboard) pasteShortcut() error {
-	seq := []inputEvent{
-		{Type: evKey, Code: keyLeftCtrl, Value: 1},
-		{Type: evSyn, Code: synReport, Value: 0},
-		{Type: evKey, Code: keyV, Value: 1},
-		{Type: evSyn, Code: synReport, Value: 0},
-		{Type: evKey, Code: keyV, Value: 0},
-		{Type: evSyn, Code: synReport, Value: 0},
-		{Type: evKey, Code: keyLeftCtrl, Value: 0},
-		{Type: evSyn, Code: synReport, Value: 0},
+// pasteShortcut presses Ctrl+V, or Ctrl+Shift+V (the terminal paste) if shift.
+func (k *virtualKeyboard) pasteShortcut(shift bool) error {
+	mods := []uint16{keyLeftCtrl}
+	if shift {
+		mods = append(mods, keyLeftShift)
+	}
+	var seq []inputEvent
+	key := func(code uint16, value int32) {
+		seq = append(seq,
+			inputEvent{Type: evKey, Code: code, Value: value},
+			inputEvent{Type: evSyn, Code: synReport, Value: 0})
+	}
+	for _, m := range mods {
+		key(m, 1)
+	}
+	key(keyV, 1)
+	key(keyV, 0)
+	for i := len(mods) - 1; i >= 0; i-- {
+		key(mods[i], 0)
 	}
 	for _, ev := range seq {
 		if err := k.emit(ev); err != nil {

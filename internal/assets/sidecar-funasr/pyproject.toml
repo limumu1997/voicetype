@@ -1,0 +1,17 @@
+[project]
+name = "voicetype-sidecar-funasr"
+version = "0.1.0"
+description = "Fun-ASR-Nano transcription sidecar for voicetype"
+requires-python = ">=3.10"
+# 独立环境：funasr 与 qwen-asr 各自钉 transformers，混装易冲突。
+# torch 不钉版本，与 qwen 环境解析到同一版本时 uv 直接复用缓存，不重复下载。
+# fun_asr_nano 自 funasr 1.4.16 起内置（含 Qwen3 LLM，需较新 transformers）。
+dependencies = [
+    "funasr>=1.4.16",
+    "torch",
+    "torchaudio",
+    "transformers>=4.51",
+]
+
+[tool.uv]
+package = false

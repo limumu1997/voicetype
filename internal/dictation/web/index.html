@@ -1,0 +1,335 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>voicetype 设置</title>
+<link rel="icon" href="data:,">
+<style>
+  :root {
+    --bg: #f6f6f4; --card: #ffffff; --fg: #1d1d1b; --muted: #6b6b66; --line: #e3e2dd;
+    --accent: #2f6fde; --accent-fg: #fff; --ok: #1f8a4c; --warn: #b7791f; --bad: #c0392b;
+    --field: #fbfbfa; --meter: #e9e8e3;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #161615; --card: #1f1f1d; --fg: #ecebe6; --muted: #9a9993; --line: #33332f;
+      --accent: #6a9cf0; --accent-fg: #0d1420; --ok: #4cc27f; --warn: #e0a64a; --bad: #ef6b5b;
+      --field: #191918; --meter: #2c2c29;
+    }
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--fg);
+         font: 15px/1.55 system-ui, "Noto Sans CJK SC", sans-serif; }
+  main { max-width: 760px; margin: 0 auto; padding: 24px 16px 64px; }
+  header { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; margin-bottom: 16px; }
+  h1 { font-size: 22px; margin: 0; letter-spacing: .2px; }
+  h2 { font-size: 15px; margin: 0 0 12px; }
+  .pill { padding: 2px 10px; border-radius: 999px; font-size: 13px; border: 1px solid currentColor; }
+  .pill.idle { color: var(--ok); } .pill.recording { color: var(--bad); }
+  .pill.loading { color: var(--warn); } .pill.error { color: var(--bad); }
+  .gpu { color: var(--muted); font-size: 13px; margin-left: auto; }
+  .card { background: var(--card); border: 1px solid var(--line); border-radius: 10px;
+          padding: 18px; margin-bottom: 14px; }
+  .banner { border-radius: 8px; padding: 10px 14px; margin-bottom: 14px; display: none;
+            align-items: center; gap: 12px; flex-wrap: wrap; }
+  .banner.show { display: flex; }
+  .banner.warn { background: color-mix(in srgb, var(--warn) 14%, transparent); }
+  .banner.bad { background: color-mix(in srgb, var(--bad) 14%, transparent); white-space: pre-wrap; word-break: break-all; }
+  .grid { display: grid; grid-template-columns: 110px 1fr; gap: 10px 14px; align-items: center; }
+  @media (max-width: 520px) { .grid { grid-template-columns: 1fr; gap: 4px; } .grid label { margin-top: 8px; } }
+  label { color: var(--muted); font-size: 14px; }
+  input, select, textarea {
+    width: 100%; font: inherit; color: var(--fg); background: var(--field);
+    border: 1px solid var(--line); border-radius: 6px; padding: 7px 9px; min-width: 0;
+  }
+  textarea { min-height: 260px; font-family: ui-monospace, "Noto Sans Mono CJK SC", monospace; font-size: 14px; }
+  input:focus, select:focus, textarea:focus { outline: 2px solid var(--accent); outline-offset: -1px; }
+  .hint { color: var(--muted); font-size: 13px; margin: 6px 0 0; }
+  .row { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; margin-top: 12px; }
+  button { font: inherit; border-radius: 6px; padding: 7px 14px; cursor: pointer;
+           border: 1px solid var(--line); background: var(--field); color: var(--fg); }
+  button.primary { background: var(--accent); border-color: var(--accent); color: var(--accent-fg); }
+  button:disabled { opacity: .55; cursor: default; }
+  .meter { flex: 1; min-width: 120px; height: 8px; background: var(--meter); border-radius: 4px; overflow: hidden; }
+  .meter > div { height: 100%; width: 0; background: var(--ok); transition: width .3s; }
+  .result { margin-top: 10px; padding: 10px 12px; border-radius: 6px; background: var(--field);
+            border: 1px dashed var(--line); display: none; }
+  .result.show { display: block; }
+  .msg { font-size: 13px; color: var(--muted); }
+  .msg.ok { color: var(--ok); } .msg.bad { color: var(--bad); }
+  .hidden { display: none !important; }
+  footer { color: var(--muted); font-size: 12px; margin-top: 18px; word-break: break-all; }
+</style>
+</head>
+<body>
+<main>
+  <header>
+    <h1>voicetype</h1>
+    <span id="status" class="pill loading">连接中…</span>
+    <span id="gpu" class="gpu"></span>
+  </header>
+
+  <div id="restartBanner" class="banner warn">
+    <span>配置已改动，重启服务后生效。</span>
+    <button id="restartNow" class="primary">立即重启</button>
+  </div>
+  <div id="errorBanner" class="banner bad"></div>
+
+  <section class="card">
+    <h2>识别引擎</h2>
+    <div class="grid">
+      <label for="backend">后端</label>
+      <select id="backend">
+        <option value="funasr">funasr — Fun-ASR-Nano（中文强、支持热词）</option>
+        <option value="qwen">qwen — Qwen3-ASR</option>
+        <option value="whisper">whisper — faster-whisper（多语言）</option>
+      </select>
+      <label for="model">模型</label>
+      <div>
+        <input id="model" list="modelList" spellcheck="false">
+        <datalist id="modelList"></datalist>
+        <p class="hint">模型名，或本地模型目录的绝对路径。必须与后端匹配。</p>
+      </div>
+      <label for="device">设备</label>
+      <select id="device"><option value="cuda">cuda（GPU）</option><option value="cpu">cpu</option></select>
+      <label for="compute" class="whisperOnly">精度</label>
+      <select id="compute" class="whisperOnly">
+        <option>float16</option><option>int8_float16</option><option>int8</option>
+      </select>
+      <label for="lang">语言</label>
+      <select id="lang">
+        <option value="">自动检测</option><option value="zh">中文</option>
+        <option value="en">英文</option><option value="ja">日文</option>
+      </select>
+    </div>
+  </section>
+
+  <section class="card">
+    <h2>麦克风</h2>
+    <div class="grid">
+      <label for="source">输入设备</label>
+      <select id="source"></select>
+      <label for="sound">提示音</label>
+      <div class="row" style="margin-top:0">
+        <select id="sound" style="flex:1">
+          <optgroup label="低沉 · 科幻">
+            <option value="warp">warp · 跃迁充能</option>
+            <option value="nebula">nebula · 星云金属音</option>
+            <option value="sonar">sonar · 深空声呐</option>
+          </optgroup>
+          <optgroup label="清亮">
+          <option value="crystal">crystal · 晶体钟音</option>
+          <option value="pulse">pulse · 电子脉冲</option>
+          <option value="halo">halo · 光晕和弦（空灵，尾音长）</option>
+          </optgroup>
+          <option value="off">关闭</option>
+        </select>
+        <button id="soundPreview">试听</button>
+      </div>
+    </div>
+    <div class="row">
+      <button id="testBtn">试录 3 秒并识别</button>
+      <div class="meter"><div id="meterBar"></div></div>
+      <span id="level" class="msg"></span>
+    </div>
+    <div id="testResult" class="result"></div>
+    <p class="hint">试录用的是上面选中的设备（不用先保存），但识别用的是当前正在运行的模型。说话时电平应在 −40 dB 以上；只有 −60 dB 左右，说明录到的只是底噪。</p>
+  </section>
+
+  <section class="card">
+    <h2>热词 <span id="hwCount" class="msg"></span></h2>
+    <textarea id="hotwords" spellcheck="false"></textarea>
+    <div class="row">
+      <button id="saveHotwords">保存热词</button>
+      <span id="hwMsg" class="msg"></span>
+    </div>
+    <p class="hint">每行一个词，# 开头是注释。保存后下次转写立即生效，不用重启。热词的偏置作用很强，写错的词会把本来认对的结果带偏，宁缺毋滥。</p>
+  </section>
+
+  <div class="row">
+    <button id="save">保存配置</button>
+    <button id="saveRestart" class="primary">保存并重启</button>
+    <span id="saveMsg" class="msg"></span>
+  </div>
+
+  <footer id="paths"></footer>
+</main>
+
+<script>
+const $ = (id) => document.getElementById(id);
+const MODELS = {
+  funasr: ["FunAudioLLM/Fun-ASR-Nano-2512"],
+  qwen: ["Qwen/Qwen3-ASR-0.6B", "Qwen/Qwen3-ASR-1.7B"],
+  whisper: ["large-v3", "large-v3-turbo", "medium", "small"],
+};
+const STATUS = { idle: "就绪", recording: "录音中", loading: "模型加载中", error: "启动失败" };
+let state = null;
+
+async function api(path, body) {
+  const opt = body === undefined ? {} : {
+    method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body),
+  };
+  const res = await fetch(path, opt);
+  if (!res.ok) throw new Error((await res.text()).trim() || res.statusText);
+  return res.json();
+}
+
+function say(el, text, kind = "") {
+  el.textContent = text;
+  el.className = "msg " + kind;
+}
+
+function countHotwords(text) {
+  return text.split("\n").filter((l) => l.split("#")[0].trim()).length;
+}
+
+function renderStatus(s) {
+  const pill = $("status");
+  pill.textContent = STATUS[s.status] || s.status;
+  pill.className = "pill " + s.status;
+  $("gpu").textContent = s.gpu ? "显存 " + s.gpu : "";
+  $("restartBanner").classList.toggle("show", s.restartNeeded && s.status !== "loading");
+  $("errorBanner").classList.toggle("show", !!s.error);
+  $("errorBanner").textContent = s.error ? "模型加载失败：\n" + s.error : "";
+}
+
+function fillModels() {
+  $("modelList").innerHTML = (MODELS[$("backend").value] || [])
+    .map((m) => `<option value="${m}">`).join("");
+  document.querySelectorAll(".whisperOnly")
+    .forEach((el) => el.classList.toggle("hidden", $("backend").value !== "whisper"));
+}
+
+function renderForm(s) {
+  const c = s.saved;
+  $("backend").value = c.backend;
+  $("model").value = c.model;
+  $("device").value = c.device;
+  $("compute").value = c.compute;
+  $("lang").value = c.lang;
+  $("sound").value = ["crystal", "pulse", "halo", "warp", "nebula", "sonar", "off"].includes(c.sound) ? c.sound : "crystal";
+  fillModels();
+
+  const sel = $("source");
+  sel.innerHTML = "";
+  sel.add(new Option("系统默认", ""));
+  for (const src of s.sources || []) sel.add(new Option(`${src.desc}`, src.name));
+  if (c.source && !(s.sources || []).some((x) => x.name === c.source)) {
+    sel.add(new Option(`⚠️ 设备不存在（会回退到系统默认）：${c.source}`, c.source));
+  }
+  sel.value = c.source;
+
+  $("hotwords").value = s.hotwords;
+  $("hwCount").textContent = `${countHotwords(s.hotwords)} 个`;
+  $("paths").textContent = `${s.configPath} · ${s.hotwordsPath}`;
+}
+
+function formValues() {
+  return {
+    backend: $("backend").value, model: $("model").value, device: $("device").value,
+    compute: $("compute").value, lang: $("lang").value, source: $("source").value,
+    sound: $("sound").value,
+  };
+}
+
+async function refresh(withForm = false) {
+  try {
+    state = await api("/api/state");
+    renderStatus(state);
+    if (withForm) renderForm(state);
+  } catch {
+    const pill = $("status");
+    pill.textContent = "未连接（服务在重启？）";
+    pill.className = "pill loading";
+  }
+}
+
+async function save(restart) {
+  const msg = $("saveMsg");
+  try {
+    state = await api("/api/config", formValues());
+    renderStatus(state);
+    if (!restart) return say(msg, "已保存", "ok");
+    await restartService(msg);
+  } catch (e) {
+    say(msg, e.message, "bad");
+  }
+}
+
+async function restartService(msg) {
+  await api("/api/restart", {});
+  say(msg, "正在重启，模型加载需要十几秒…");
+  const start = Date.now();
+  await new Promise((r) => setTimeout(r, 1500));
+  while (Date.now() - start < 120000) {
+    await refresh();
+    if (state && (state.status === "idle" || state.status === "error") && !state.restartNeeded) {
+      await refresh(true);
+      return say(msg, state.status === "idle" ? "已重启，新配置生效" : "已重启，但模型加载失败", state.status === "idle" ? "ok" : "bad");
+    }
+    await new Promise((r) => setTimeout(r, 1000));
+  }
+  say(msg, "等待超时，请查看 journalctl --user -u voicetype", "bad");
+}
+
+$("backend").addEventListener("change", () => {
+  fillModels();
+  const list = MODELS[$("backend").value] || [];
+  if (!list.includes($("model").value) && !$("model").value.startsWith("/")) $("model").value = list[0] || "";
+});
+$("soundPreview").onclick = () => api("/api/sound", { name: $("sound").value }).catch(() => {});
+$("sound").addEventListener("change", async () => {
+  // Cue changes apply live: save right away, no restart needed.
+  try {
+    state = await api("/api/config", formValues());
+    renderStatus(state);
+    say($("saveMsg"), "提示音已切换", "ok");
+  } catch (e) {
+    say($("saveMsg"), e.message, "bad");
+  }
+  if ($("sound").value !== "off") api("/api/sound", { name: $("sound").value }).catch(() => {});
+});
+$("save").onclick = () => save(false);
+$("saveRestart").onclick = () => save(true);
+$("restartNow").onclick = () => restartService($("saveMsg")).catch((e) => say($("saveMsg"), e.message, "bad"));
+$("hotwords").addEventListener("input", () => {
+  $("hwCount").textContent = `${countHotwords($("hotwords").value)} 个`;
+  say($("hwMsg"), "未保存");
+});
+$("saveHotwords").onclick = async () => {
+  try {
+    await api("/api/hotwords", { text: $("hotwords").value });
+    say($("hwMsg"), "已保存，下次转写生效", "ok");
+  } catch (e) {
+    say($("hwMsg"), e.message, "bad");
+  }
+};
+$("testBtn").onclick = async () => {
+  const btn = $("testBtn"), out = $("testResult");
+  btn.disabled = true;
+  btn.textContent = "录音中，请说话…";
+  $("meterBar").style.width = "0";
+  say($("level"), "");
+  out.classList.remove("show");
+  try {
+    const r = await api("/api/test", { source: $("source").value, seconds: 3 });
+    const pct = Math.max(0, Math.min(100, (r.rmsDb + 70) / 60 * 100));
+    $("meterBar").style.width = pct + "%";
+    $("meterBar").style.background = r.rmsDb < -55 ? "var(--bad)" : r.rmsDb < -40 ? "var(--warn)" : "var(--ok)";
+    say($("level"), `均值 ${r.rmsDb} dB · 峰值 ${r.peakDb} dB`, r.rmsDb < -55 ? "bad" : "");
+    out.textContent = r.text || "（没识别出内容）";
+    out.classList.add("show");
+  } catch (e) {
+    say($("level"), e.message, "bad");
+  } finally {
+    btn.disabled = false;
+    btn.textContent = "试录 3 秒并识别";
+  }
+};
+
+refresh(true);
+setInterval(() => refresh(), 3000);
+</script>
+</body>
+</html>

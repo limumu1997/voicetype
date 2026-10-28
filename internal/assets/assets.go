@@ -4,9 +4,10 @@ package assets
 import "embed"
 
 // Sidecar holds the shared transcribe.py plus a pyproject.toml per backend:
-// sidecar/ for faster-whisper and sidecar-qwen/ for Qwen3-ASR. The two backends
-// get separate uv environments because their CUDA stacks (cu12 vs cu13 cuDNN)
-// can't coexist in one venv.
+// sidecar/ for faster-whisper, sidecar-qwen/ for Qwen3-ASR and sidecar-funasr/
+// for Fun-ASR-Nano. Each backend gets its own uv environment because their
+// CUDA stacks (cu12 vs cu13 cuDNN) and pinned transformers versions can't
+// coexist in one venv.
 //
-//go:embed sidecar/transcribe.py sidecar/pyproject.toml sidecar-qwen/pyproject.toml
+//go:embed sidecar/transcribe.py sidecar/pyproject.toml sidecar-qwen/pyproject.toml sidecar-funasr/pyproject.toml
 var Sidecar embed.FS

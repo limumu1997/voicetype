@@ -2,6 +2,7 @@ package dictation
 
 import (
 	"bufio"
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -11,7 +12,15 @@ import (
 	"path/filepath"
 	"sync"
 	"syscall"
+	"time"
+
+	"voicetype/internal/assets"
 )
+
+// transcribeTimeout bounds a single request. A hung sidecar (GPU wedge, stuck
+// model download) is killed on expiry; the daemon then exits and systemd
+// restarts both, instead of leaving the hotkey silently dead.
+const transcribeTimeout = 120 * time.Second
 
 // sidecar drives the long-running faster-whisper Python process. The model
 // stays loaded in VRAM across requests; we talk to it over line-delimited JSON.
@@ -21,6 +30,9 @@ type sidecar struct {
 	stdout *bufio.Scanner
 
 	mu sync.Mutex // serialize transcription requests
+
+	done      chan struct{} // closed when the process exits
+	exitState string        // how it exited; valid after done is closed
 }
 
 type sidecarReq struct {
@@ -34,19 +46,18 @@ type sidecarResp struct {
 	Error string `json:"error"`
 }
 
-// startSidecar launches `uv run` in the extracted sidecar dir and blocks until
-// the model reports ready.
+// startSidecar launches the backend's venv python on transcribe.py and blocks
+// until the model reports ready.
 func startSidecar(cfg Config) (*sidecar, error) {
-	// transcribe.py is shared; only the venv differs per backend (whisper and
-	// qwen need separate CUDA stacks, see assets.go).
-	script := filepath.Join(SidecarDir(), "transcribe.py")
-	if _, err := os.Stat(script); err != nil {
-		return nil, fmt.Errorf("sidecar not installed (run `voicetype setup`): %w", err)
-	}
+	// transcribe.py is shared; only the venv differs per backend (see assets.go).
 	dir := BackendDir(cfg.Backend)
 	if _, err := os.Stat(dir); err != nil {
-		return nil, fmt.Errorf("%s backend not installed at %s (run `voicetype setup`): %w", cfg.Backend, dir, err)
+		return nil, fmt.Errorf("%s backend not installed at %s (run `voicetype setup %s`): %w", cfg.Backend, dir, cfg.Backend, err)
 	}
+	if err := SyncScript(); err != nil {
+		return nil, fmt.Errorf("update transcribe.py: %w", err)
+	}
+	script := filepath.Join(SidecarDir(), "transcribe.py")
 
 	// Launch the venv python directly (not via `uv run`) so the model-holding
 	// process is a direct child: Pdeathsig then guarantees it dies with the
@@ -65,6 +76,7 @@ func startSidecar(cfg Config) (*sidecar, error) {
 		"VOICETYPE_DEVICE="+cfg.Device,
 		"VOICETYPE_COMPUTE="+cfg.Compute,
 		"VOICETYPE_LANG="+cfg.Lang,
+		"VOICETYPE_HOTWORDS="+HotwordsPath(),
 	)
 
 	stdin, err := cmd.StdinPipe()
@@ -85,8 +97,19 @@ func startSidecar(cfg Config) (*sidecar, error) {
 		cmd:    cmd,
 		stdin:  stdin,
 		stdout: bufio.NewScanner(stdout),
+		done:   make(chan struct{}),
 	}
 	sc.stdout.Buffer(make([]byte, 0, 64*1024), 1<<20)
+	// Process.Wait (not Cmd.Wait) so the stdout pipe isn't closed under the
+	// scanner; a dead sidecar still surfaces as EOF there.
+	go func() {
+		if st, err := cmd.Process.Wait(); err != nil {
+			sc.exitState = err.Error()
+		} else {
+			sc.exitState = st.String()
+		}
+		close(sc.done)
+	}()
 
 	// Wait for the readiness line (model load can take several seconds).
 	for sc.stdout.Scan() {
@@ -105,6 +128,12 @@ func startSidecar(cfg Config) (*sidecar, error) {
 func (s *sidecar) transcribe(wav, lang string) (string, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+
+	timer := time.AfterFunc(transcribeTimeout, func() {
+		log.Printf("sidecar unresponsive for %s, killing it", transcribeTimeout)
+		s.cmd.Process.Kill()
+	})
+	defer timer.Stop()
 
 	req, _ := json.Marshal(sidecarReq{Wav: wav, Language: lang})
 	if _, err := fmt.Fprintf(s.stdin, "%s\n", req); err != nil {
@@ -141,13 +170,33 @@ func fileExists(p string) bool {
 	return err == nil
 }
 
+// close asks the sidecar to exit by closing its stdin, killing it if it doesn't
+// go within a few seconds.
 func (s *sidecar) close() {
-	if s.stdin != nil {
-		s.stdin.Close()
+	s.stdin.Close()
+	select {
+	case <-s.done:
+	case <-time.After(3 * time.Second):
+		s.cmd.Process.Kill()
+		<-s.done
 	}
-	if s.cmd != nil && s.cmd.Process != nil {
-		if err := s.cmd.Wait(); err != nil {
-			log.Printf("sidecar exited: %v", err)
-		}
+}
+
+// SyncScript writes the transcribe.py embedded in this binary into the sidecar
+// dir when the copy on disk differs, so upgrading the binary can never leave a
+// stale sidecar script behind (which once silently ignored the model setting).
+func SyncScript() error {
+	want, err := assets.Sidecar.ReadFile("sidecar/transcribe.py")
+	if err != nil {
+		return err
 	}
+	path := filepath.Join(SidecarDir(), "transcribe.py")
+	if have, _ := os.ReadFile(path); bytes.Equal(have, want) {
+		return nil
+	}
+	if err := os.MkdirAll(SidecarDir(), 0o755); err != nil {
+		return err
+	}
+	log.Printf("updating %s from the embedded copy", path)
+	return os.WriteFile(path, want, 0o644)
 }

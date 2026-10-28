@@ -26,6 +26,8 @@ func Doctor() {
 	checkGPU()
 	checkConfig(cfg)
 	checkSidecar(cfg)
+	checkHotwords()
+	checkFocus()
 	checkDaemon()
 }
 
@@ -35,12 +37,52 @@ func checkConfig(cfg dictation.Config) {
 		lang = "auto"
 	}
 	ok(fmt.Sprintf("config       backend=%s model=%s lang=%s", cfg.Backend, cfg.Model, lang))
-	// The single `model` key must match the backend (whisper vs qwen names).
-	isQwenName := strings.HasPrefix(cfg.Model, "Qwen")
-	if cfg.Backend == "qwen" && !isQwenName {
-		warn("config       backend=qwen 但 model 不是 Qwen/... — 会加载失败")
-	} else if cfg.Backend != "qwen" && isQwenName {
-		warn("config       backend=whisper 但 model 是 qwen 名 — 会加载失败")
+	// A local model dir can't be checked by name; just make sure it exists.
+	if strings.HasPrefix(cfg.Model, "/") {
+		if _, err := os.Stat(cfg.Model); err != nil {
+			bad("config       本地模型目录不存在: " + cfg.Model)
+		}
+		return
+	}
+	// Otherwise the single `model` key must match the backend by name.
+	var mismatch bool
+	switch cfg.Backend {
+	case "qwen":
+		mismatch = !strings.HasPrefix(cfg.Model, "Qwen/")
+	case "funasr":
+		mismatch = !strings.HasPrefix(cfg.Model, "FunAudioLLM/")
+	default:
+		mismatch = strings.Contains(cfg.Model, "/")
+	}
+	if mismatch {
+		warn(fmt.Sprintf("config       model=%s 看起来不属于 backend=%s — 会加载失败", cfg.Model, cfg.Backend))
+	}
+}
+
+func checkHotwords() {
+	data, err := os.ReadFile(dictation.HotwordsPath())
+	if err != nil {
+		warn("hotwords     无热词表 (" + dictation.HotwordsPath() + ")")
+		return
+	}
+	n := 0
+	for _, line := range strings.Split(string(data), "\n") {
+		if w, _, _ := strings.Cut(line, "#"); strings.TrimSpace(w) != "" {
+			n++
+		}
+	}
+	ok(fmt.Sprintf("hotwords     %d 个 (%s)", n, dictation.HotwordsPath()))
+}
+
+// checkFocus runs the same AT-SPI probe the daemon uses before pasting. From a
+// terminal it should report "terminal"; "unknown" means python3-gi or
+// gir1.2-atspi-2.0 is missing, and pastes fall back to plain Ctrl+V.
+func checkFocus() {
+	switch k := dictation.DetectFocus(); k {
+	case dictation.FocusUnknown:
+		warn("focus        无法识别焦点 (缺 python3-gi / gir1.2-atspi-2.0?) — 一律 Ctrl+V")
+	default:
+		ok("focus        AT-SPI 焦点识别可用 (当前: " + string(k) + ")")
 	}
 }
 
