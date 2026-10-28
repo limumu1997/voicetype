@@ -202,6 +202,7 @@ model = "/home/you/models/asr/fun-asr-nano"
 device = "cuda"      # cuda | cpu
 compute = "float16"  # float16 | int8_float16 | int8 (仅 whisper)
 lang = ""            # "" = 自动; zh / en / ja
+vad = "fsmn-vad"     # 长录音按停顿切段 (仅 funasr); 可填本地目录; "off" 关闭
 source = ""          # 录音输入设备名; "" = 系统默认 (pw-record --target)
 sound = "halo"       # 提示音: halo | crystal | pulse (清亮) | warp | nebula | sonar (低沉) | off
 web = "127.0.0.1:27865"  # 设置页地址; "off" 关闭
@@ -214,6 +215,7 @@ web = "127.0.0.1:27865"  # 设置页地址; "off" 关闭
 | `device` | `cuda` | `cuda` 或 `cpu`（GPU 初始化失败会自动回退到 CPU，日志里有记录） |
 | `compute` | `float16` | `float16` / `int8_float16` / `int8`（仅 whisper） |
 | `lang` | 空（自动） | 强制语言，如 `zh`、`en` |
+| `vad` | `fsmn-vad` | 仅 funasr：先按停顿把录音切成 ≤30 秒的段再识别。不切的话超过 30 秒就会截断丢字，5 分钟会爆显存；切段后长录音完整，显存峰值固定在约 3.6G。可填本地目录，`off` 关闭 |
 | `source` | 空（默认） | 固定录音设备。Intel SOF 笔记本的默认源常常是空着的耳机孔；**设备名可能变**，失效后会悄悄回退到默认源。用设置页试录确认 |
 | `sound` | `crystal` | 开始/结束提示音，程序内合成。设置页可试听，切换立即生效 |
 | `web` | `127.0.0.1:27865` | 设置页地址，`off` 关闭。避开了 Gradio 默认的 7860+ 和代理常用的 7890 |
@@ -267,6 +269,8 @@ systemctl --user stop voicetype        # 临时腾出显存
 | 文字进了剪贴板但没粘上 | 看日志里的 `focus=`：`none` 说明当时焦点不在输入框；`unknown` 说明是 Chrome/Electron 或不支持无障碍的终端（如 kitty），按 Ctrl+V 或手动粘贴 |
 | 换了模型但没生效 | 手改配置后需要 `systemctl --user restart voicetype`；设置页的"保存并重启"会自动处理 |
 | 显存不足 / OOM | `systemctl --user stop voicetype` 腾出显存，或换成 qwen 0.6B |
+| 显存会一直涨吗 | 不会。实测连续转写不泄漏；每次推理临时多占的显存用完就还，常驻的约 3.5G 是模型本身，停服务才释放 |
+| 长段口述丢内容 | 确认 `vad` 没有设成 `off`（funasr 需要靠它分段） |
 | 设置页打不开 | 守护进程没在运行，或 `web = "off"` |
 
 更深入的设计取舍与踩坑记录见 [ARCHITECTURE.md](ARCHITECTURE.md)。

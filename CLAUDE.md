@@ -54,6 +54,7 @@ The whole design works around two Wayland security restrictions; preserve these 
 - **Never capture `wl-copy` output through a pipe** (`CombinedOutput`, a `bytes.Buffer`): wl-copy forks a child that keeps serving the selection and inherits stdout/stderr, so `Wait` blocks until another client takes the clipboard over — GPaste doesn't, so the paste keystroke was delayed indefinitely. `wlCopy` sends stderr to the daemon's own fd instead.
 - **gnome-shell ignores the notify-osd `x-canonical-private-synchronous` hint.** Notifications share one slot by ID (`notify-send -p` / `-r`), and the "recording" banner is closed via D-Bus `CloseNotification` the moment recording stops (synchronously, so it can't race a later error notice). No success notification.
 - **Sidecar load is retried** (5s, 15s; 3 attempts) before the daemon settles into the error state; a ready notice reports the load time, and a `voicetype.sock.recovering` marker turns it into a "recovered" notice after a crash restart.
+- **Fun-ASR-Nano needs VAD segmentation** (`vad` key, default `fsmn-vad`, passed as `VOICETYPE_VAD`): unsegmented it truncates audio past ~30s and OOMs at 5 min; with `vad_model` + `max_single_segment_time=30000` long audio is complete and peak VRAM stays ~3.6G regardless of length. funasr joins segments with spaces; the sidecar strips whitespace between CJK characters only.
 - Recordings auto-stop after `maxRecording` (5 min) so a forgotten second press can't grow the WAV until it blows the 120s transcribe timeout.
 - Fun-ASR-Nano is built into funasr ≥ 1.4.16: load it **without** `trust_remote_code` (with it, funasr logs a spurious "Loading remote code failed: model" on every start).
 - Don't enable a11y globally (`org.a11y.Status.IsEnabled`) to make Chrome/Electron visible to the focus probe — it slows every Chromium app.
@@ -71,6 +72,7 @@ Lives in `~/.config/voicetype/config.toml` (flat `key = value`, parsed by a tiny
 | `device` (`VOICETYPE_DEVICE`) | `cuda` | `cuda` or `cpu` |
 | `compute` (`VOICETYPE_COMPUTE`) | `float16` | `float16`/`int8_float16`/`int8` (whisper only) |
 | `lang` (`VOICETYPE_LANG`) | "" (auto) | force a language, e.g. `zh`, `en` |
+| `vad` (`VOICETYPE_VAD`) | `fsmn-vad` | funasr only: VAD segmenter (name or local dir) splitting audio into ≤30s chunks; `off` disables |
 | `source` (`VOICETYPE_SOURCE`) | "" (default) | pin a `pw-record --target` input device |
 | `sound` (`VOICETYPE_SOUND`) | `crystal` | start/stop cues synthesized in Go (`sound.go`: low sci-fi `warp`/`nebula`/`sonar`, bright `crystal`/`pulse`/`halo`, or `off`; low presets keep ≥40% energy above 300 Hz because laptop speakers can't play the fundamental), played with `pw-play`; recording starts 250ms into the start cue so its loud body isn't captured. Applied live from the web UI |
 | `web` (`VOICETYPE_WEB`) | `127.0.0.1:27865` | settings UI listen addr; `off` disables (27865: clear of Gradio's 7860+ and the 7890 proxy) |

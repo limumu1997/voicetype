@@ -15,11 +15,13 @@
   VOICETYPE_DEVICE    默认 cuda
   VOICETYPE_COMPUTE   默认 float16（仅 whisper 用）
   VOICETYPE_LANG      默认空（自动检测）
+  VOICETYPE_VAD       funasr 的 VAD 分段模型（名称或本地目录），默认 fsmn-vad；off 关闭
   VOICETYPE_HOTWORDS  热词文件路径（每行一个，# 注释）；每次转写前按 mtime 重读，改完即生效
 """
 
 import json
 import os
+import re
 import sys
 
 # 协议通道：main() 里指向原 stdout 的副本，而 fd 1 被重定向到 stderr，
@@ -153,20 +155,33 @@ def make_qwen_backend(model_name, device):
 _FUNASR_LANG = {"zh": "中文", "en": "英文", "ja": "日文"}
 
 
-def make_funasr_backend(model_name, device):
-    """返回 transcribe(wav, lang, hotwords) -> text。"""
+# 分段结果之间 funasr 用空格拼接；去掉 CJK 字符/标点之间的空格，保留英文词间空格。
+_CJK = r"\u3000-\u303f\u4e00-\u9fff\uff00-\uffef"
+_CJK_GAP = re.compile(rf"(?<=[{_CJK}])\s+(?=[{_CJK}])")
+
+
+def make_funasr_backend(model_name, device, vad):
+    """返回 transcribe(wav, lang, hotwords) -> text。
+
+    vad 非 off 时先用 VAD 按停顿把录音切成 ≤30s 的段再逐段识别：Fun-ASR-Nano
+    一次吃不下长音频，实测 30s 起就截断丢字，5 分钟直接 OOM；分段后推理峰值
+    显存与时长无关（~3.6G），短句延迟不变。
+    """
     from funasr import AutoModel
 
     # fun_asr_nano is built into funasr >= 1.4.16; trust_remote_code would only
     # log a spurious "Loading remote code failed: model" on every start.
     dev = {"cuda": "cuda:0"}.get(device, device)
+    kw = {"disable_update": True}
+    if vad and vad != "off":
+        kw.update(vad_model=vad, vad_kwargs={"max_single_segment_time": 30000})
 
-    _log(f"[sidecar] funasr: loading model={model_name} device={dev}")
+    _log(f"[sidecar] funasr: loading model={model_name} vad={vad or 'off'} device={dev}")
     try:
-        model = AutoModel(model=model_name, device=dev, disable_update=True)
+        model = AutoModel(model=model_name, device=dev, **kw)
     except Exception as e:
         _log(f"[sidecar] {dev} init failed ({e}); fallback to cpu")
-        model = AutoModel(model=model_name, device="cpu", disable_update=True)
+        model = AutoModel(model=model_name, device="cpu", **kw)
 
     def transcribe(wav, lang, hotwords):
         kw = {"itn": True, "disable_pbar": True}  # itn: 数字/日期规范化 + 标点
@@ -178,7 +193,7 @@ def make_funasr_backend(model_name, device):
         res = model.generate(input=[wav], cache={}, batch_size=1, **kw)
         if not res:
             return ""
-        return (res[0].get("text") or "").strip()
+        return _CJK_GAP.sub("", (res[0].get("text") or "").strip())
 
     return transcribe
 
@@ -201,7 +216,8 @@ def main():
     if backend == "qwen":
         transcribe = make_qwen_backend(model_name or "Qwen/Qwen3-ASR-0.6B", device)
     elif backend == "funasr":
-        transcribe = make_funasr_backend(model_name or "FunAudioLLM/Fun-ASR-Nano-2512", device)
+        vad = os.environ.get("VOICETYPE_VAD", "fsmn-vad").strip()
+        transcribe = make_funasr_backend(model_name or "FunAudioLLM/Fun-ASR-Nano-2512", device, vad)
     else:
         transcribe = make_whisper_backend(model_name or "large-v3", device, compute)
 

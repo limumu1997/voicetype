@@ -76,6 +76,7 @@ func startSidecar(cfg Config) (*sidecar, error) {
 		"VOICETYPE_DEVICE="+cfg.Device,
 		"VOICETYPE_COMPUTE="+cfg.Compute,
 		"VOICETYPE_LANG="+cfg.Lang,
+		"VOICETYPE_VAD="+cfg.VAD,
 		"VOICETYPE_HOTWORDS="+HotwordsPath(),
 	)
 

@@ -83,6 +83,7 @@ model = "large-v3"
 device = "cuda"      # cuda | cpu
 compute = "float16"  # float16 | int8_float16 | int8 (仅 whisper)
 lang = ""            # "" = 自动; zh / en ...
+vad = "fsmn-vad"     # 长录音按停顿切段 (仅 funasr); 可填本地目录; "off" 关闭
 source = ""          # 录音输入设备名; "" = 系统默认 (pw-record --target)
 sound = "crystal"    # 提示音: warp | nebula | sonar (低沉) | crystal | pulse | halo (清亮) | off
 web = "127.0.0.1:27865"  # 设置页地址 (voicetype config 打开); "off" 关闭

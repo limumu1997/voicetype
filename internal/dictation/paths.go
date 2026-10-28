@@ -86,17 +86,18 @@ type Config struct {
 	Lang    string // lang / VOICETYPE_LANG ("" = auto)
 	Source  string // source / VOICETYPE_SOURCE ("" = default mic)
 	Web     string // web / VOICETYPE_WEB — config UI listen addr ("off" disables)
-	Sound   string // sound / VOICETYPE_SOUND — start/stop cues ("on" | "off")
+	Sound   string // sound / VOICETYPE_SOUND — start/stop cue preset, or "off"
+	VAD     string // vad / VOICETYPE_VAD — funasr VAD segmenter (name or local dir), "off" disables
 }
 
 // ConfigKeys are the config.toml keys, in the order the template lists them.
-var ConfigKeys = []string{"backend", "model", "device", "compute", "lang", "source", "sound", "web"}
+var ConfigKeys = []string{"backend", "model", "device", "compute", "lang", "vad", "source", "sound", "web"}
 
 // Map returns the config as config.toml key/value pairs.
 func (c Config) Map() map[string]string {
 	return map[string]string{
 		"backend": c.Backend, "model": c.Model, "device": c.Device,
-		"compute": c.Compute, "lang": c.Lang, "source": c.Source, "sound": c.Sound, "web": c.Web,
+		"compute": c.Compute, "lang": c.Lang, "source": c.Source, "sound": c.Sound, "web": c.Web, "vad": c.VAD,
 	}
 }
 
@@ -116,6 +117,7 @@ func LoadConfig() Config {
 		Source:  pick("VOICETYPE_SOURCE", f["source"], ""),
 		Web:     pick("VOICETYPE_WEB", f["web"], "127.0.0.1:27865"),
 		Sound:   pick("VOICETYPE_SOUND", f["sound"], "on"),
+		VAD:     pick("VOICETYPE_VAD", f["vad"], "fsmn-vad"),
 	}
 }
 
