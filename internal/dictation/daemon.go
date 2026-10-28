@@ -208,6 +208,7 @@ func (d *Daemon) toggle() string {
 		d.rec = r
 		d.mu.Unlock()
 		notify("🎤 录音中… 再按一次结束", 0)
+		time.AfterFunc(maxRecording, func() { d.autoStop(r) })
 		return "recording"
 	}
 
@@ -259,6 +260,23 @@ func (d *Daemon) toggle() string {
 	// No success notification: the pasted text and the stop cue are the
 	// feedback, and the recording banner is already gone.
 	return "ok"
+}
+
+// maxRecording caps a recording whose second press never came, so it can't
+// grow without bound and then blow the sidecar's transcribe timeout.
+var maxRecording = 5 * time.Minute
+
+// autoStop ends recording r if it is still the active one once the cap hits.
+func (d *Daemon) autoStop(r *recorder) {
+	d.mu.Lock()
+	active := d.rec == r
+	d.mu.Unlock()
+	if !active {
+		return
+	}
+	log.Printf("recording hit the %s cap; stopping", maxRecording)
+	d.toggle()
+	notify(fmt.Sprintf("⏱️ 录音已满 %.0f 分钟，已自动结束并转写", maxRecording.Minutes()), 4000)
 }
 
 // Toggle is the client side: connect to the daemon and ask it to toggle.

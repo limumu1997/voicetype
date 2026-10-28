@@ -157,14 +157,16 @@ def make_funasr_backend(model_name, device):
     """返回 transcribe(wav, lang, hotwords) -> text。"""
     from funasr import AutoModel
 
+    # fun_asr_nano is built into funasr >= 1.4.16; trust_remote_code would only
+    # log a spurious "Loading remote code failed: model" on every start.
     dev = {"cuda": "cuda:0"}.get(device, device)
 
     _log(f"[sidecar] funasr: loading model={model_name} device={dev}")
     try:
-        model = AutoModel(model=model_name, trust_remote_code=True, device=dev, disable_update=True)
+        model = AutoModel(model=model_name, device=dev, disable_update=True)
     except Exception as e:
         _log(f"[sidecar] {dev} init failed ({e}); fallback to cpu")
-        model = AutoModel(model=model_name, trust_remote_code=True, device="cpu", disable_update=True)
+        model = AutoModel(model=model_name, device="cpu", disable_update=True)
 
     def transcribe(wav, lang, hotwords):
         kw = {"itn": True, "disable_pbar": True}  # itn: 数字/日期规范化 + 标点

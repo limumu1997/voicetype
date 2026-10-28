@@ -217,7 +217,7 @@ Wayland 不让查"键盘焦点在哪",但无障碍总线(AT-SPI)能。转写的�
 Chrome 会留一个"陈旧的 ACTIVE 窗口"但树是空的,自然落到 unknown。**不全局开 a11y**:那会拖慢所有 Chromium/Electron 应用。
 
 ### 7.10 自愈 —— 边车死了就让 systemd 重来
-**加载阶段**失败(进程被杀、暂时 OOM)先在 daemon 内重试:5s、15s 后各一次,共 3 次;仍失败才停在错误状态等人改配置。**运行阶段**边车进程退出(OOM、CUDA 错误)或单次转写超时(120s,超时即 kill)时,daemon **以非零码退出**,由 `Restart=on-failure` 连同模型一起拉起。否则 daemon 看似健康、每次热键都"转写失败"。区分正常关停(SIGTERM)用 `stopping` 标志。
+**加载阶段**失败(进程被杀、暂时 OOM)先在 daemon 内重试:5s、15s 后各一次,共 3 次;仍失败才停在错误状态等人改配置。**录音上限 5 分钟**(`maxRecording`):忘了按第二下时自动结束并转写,避免录音无限增长、再撞上转写超时把边车杀掉。**运行阶段**边车进程退出(OOM、CUDA 错误)或单次转写超时(120s,超时即 kill)时,daemon **以非零码退出**,由 `Restart=on-failure` 连同模型一起拉起。否则 daemon 看似健康、每次热键都"转写失败"。区分正常关停(SIGTERM)用 `stopping` 标志。
 
 ### 7.11 设置页 —— daemon 内嵌 HTTP
 `voicetype config` 打开 `http://127.0.0.1:27865/`(`web` 键可改,`off` 关闭)。可改后端/模型/设备/语言/麦克风(写回 config.toml,**按行替换值、保留注释**,保存并重启走 `systemctl --user restart --no-block`——systemctl 在本服务 cgroup 里会被一起杀,`--no-block` 让重启任务留在 systemd 侧)、编辑热词(即时生效)、**试录 3 秒**看电平并用当前模型识别(选麦克风靠这个)。防护:只认 loopback Host(防 DNS rebinding);POST 只收 `application/json`(跨站页面发 JSON 需 CORS 预检,我们从不应答),其他网站改不了配置。

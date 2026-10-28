@@ -263,6 +263,7 @@ systemctl --user stop voicetype        # 临时腾出显存
 |---|---|
 | 按热键提示"模型加载中" | 刚登录或刚重启，等十几秒，就绪时会有通知 |
 | 转写总是空，或识别成乱码 | 麦克风选错（常见：录到空耳机孔）。设置页试录：说话时电平应高于 −40 dB，只有 −60 dB 左右说明录到的是底噪 |
+| 忘了按第二下 | 录音满 5 分钟会自动结束并转写，弹通知说明 |
 | 文字进了剪贴板但没粘上 | 看日志里的 `focus=`：`none` 说明当时焦点不在输入框；`unknown` 说明是 Chrome/Electron 或不支持无障碍的终端（如 kitty），按 Ctrl+V 或手动粘贴 |
 | 换了模型但没生效 | 手改配置后需要 `systemctl --user restart voicetype`；设置页的"保存并重启"会自动处理 |
 | 显存不足 / OOM | `systemctl --user stop voicetype` 腾出显存，或换成 qwen 0.6B |

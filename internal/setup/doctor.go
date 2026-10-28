@@ -74,16 +74,23 @@ func checkHotwords() {
 	ok(fmt.Sprintf("hotwords     %d 个 (%s)", n, dictation.HotwordsPath()))
 }
 
-// checkFocus runs the same AT-SPI probe the daemon uses before pasting. From a
-// terminal it should report "terminal"; "unknown" means python3-gi or
-// gir1.2-atspi-2.0 is missing, and pastes fall back to plain Ctrl+V.
+// checkFocus first checks that the system python3 can load AT-SPI, then runs
+// the same probe the daemon uses before pasting. "unknown" with working libs
+// just means the focus is somewhere opaque (Chrome/Electron, a non-VTE
+// terminal), not that anything is broken.
 func checkFocus() {
-	switch k := dictation.DetectFocus(); k {
-	case dictation.FocusUnknown:
-		warn("focus        无法识别焦点 (缺 python3-gi / gir1.2-atspi-2.0?) — 一律 Ctrl+V")
-	default:
-		ok("focus        AT-SPI 焦点识别可用 (当前: " + string(k) + ")")
+	err := exec.Command("python3", "-I", "-c",
+		`import gi; gi.require_version("Atspi", "2.0"); from gi.repository import Atspi`).Run()
+	if err != nil {
+		warn("focus        系统 python3 载入不了 AT-SPI (缺 python3-gi / gir1.2-atspi-2.0) — 一律 Ctrl+V")
+		return
 	}
+	k := dictation.DetectFocus()
+	note := ""
+	if k == dictation.FocusUnknown {
+		note = "，焦点在 Chrome/Electron 等不暴露无障碍信息的程序里时就是这样"
+	}
+	ok(fmt.Sprintf("focus        AT-SPI 焦点识别可用 (当前: %s%s)", k, note))
 }
 
 func checkCmd(name, desc string) {
