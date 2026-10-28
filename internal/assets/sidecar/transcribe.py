@@ -81,6 +81,28 @@ def _hotwords():
     return _hotwords_cache["words"]
 
 
+# 输出整形，所有后端共用：
+# - 分段结果之间 funasr 用空格拼接：去掉 CJK 字符/标点之间的空格，保留英文词间空格。
+# - 逐个念字母时模型把每个字母（大写输出）和数字当成独立的词："H T T P"、
+#   "M P 3"、"E S P 3 2"：把连续 ≥2 个单独的大写字母/数字合并成 "HTTP"、
+#   "MP3"、"ESP32"。串里至少要有一个字母，纯数字（"第 3 4 名"）不动；
+#   单个字母（"Plan B"、"选 A 还是 B"）也不动。
+_CJK = r"\u3000-\u303f\u4e00-\u9fff\uff00-\uffef"
+_CJK_GAP = re.compile(rf"(?<=[{_CJK}])\s+(?=[{_CJK}])")
+_SPELLED = re.compile(r"(?<![A-Za-z0-9])[A-Z0-9](?: [A-Z0-9](?![A-Za-z0-9]))+")
+_HAS_CAP = re.compile(r"[A-Z]")
+
+
+def _merge_spelled(m):
+    s = m.group(0)
+    return s.replace(" ", "") if _HAS_CAP.search(s) else s
+
+
+def _tidy(text):
+    text = _CJK_GAP.sub("", text)
+    return _SPELLED.sub(_merge_spelled, text)
+
+
 def make_whisper_backend(model_name, device, compute):
     """返回 transcribe(wav, lang, hotwords) -> text。"""
     from faster_whisper import WhisperModel
@@ -155,11 +177,6 @@ def make_qwen_backend(model_name, device):
 _FUNASR_LANG = {"zh": "中文", "en": "英文", "ja": "日文"}
 
 
-# 分段结果之间 funasr 用空格拼接；去掉 CJK 字符/标点之间的空格，保留英文词间空格。
-_CJK = r"\u3000-\u303f\u4e00-\u9fff\uff00-\uffef"
-_CJK_GAP = re.compile(rf"(?<=[{_CJK}])\s+(?=[{_CJK}])")
-
-
 def make_funasr_backend(model_name, device, vad):
     """返回 transcribe(wav, lang, hotwords) -> text。
 
@@ -193,7 +210,7 @@ def make_funasr_backend(model_name, device, vad):
         res = model.generate(input=[wav], cache={}, batch_size=1, **kw)
         if not res:
             return ""
-        return _CJK_GAP.sub("", (res[0].get("text") or "").strip())
+        return (res[0].get("text") or "").strip()
 
     return transcribe
 
@@ -232,7 +249,7 @@ def main():
             req = json.loads(line)
             wav = req["wav"]
             lang = req.get("language", default_lang) or ""
-            text = transcribe(wav, lang, _hotwords())
+            text = _tidy(transcribe(wav, lang, _hotwords()))
             _send({"text": text})
         except Exception as e:
             _send({"error": str(e)})

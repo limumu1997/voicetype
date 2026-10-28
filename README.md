@@ -270,6 +270,7 @@ systemctl --user stop voicetype        # 临时腾出显存
 | 换了模型但没生效 | 手改配置后需要 `systemctl --user restart voicetype`；设置页的"保存并重启"会自动处理 |
 | 显存不足 / OOM | `systemctl --user stop voicetype` 腾出显存，或换成 qwen 0.6B |
 | 显存会一直涨吗 | 不会。实测连续转写不泄漏；每次推理临时多占的显存用完就还，常驻的约 3.5G 是模型本身，停服务才释放 |
+| 念字母缩写时字母间有空格 | 已自动合并（"H T T P" → "HTTP"，字母数字混念也行："E S P 3 2" → "ESP32"）。若字母本身认错（如 H 听成 S），把这个缩写加进热词 |
 | 长段口述丢内容 | 确认 `vad` 没有设成 `off`（funasr 需要靠它分段） |
 | 设置页打不开 | 守护进程没在运行，或 `web = "off"` |
 

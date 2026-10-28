@@ -226,7 +226,7 @@ Chrome 会留一个"陈旧的 ACTIVE 窗口"但树是空的,自然落到 unknown
 `~/.config/voicetype/hotwords.txt`,每行一词。sidecar 每次转写前按 mtime 重读,改完即生效。funasr 传 `hotwords`,qwen 传 `context`,whisper 传 `hotwords` 字符串。**偏置很强**:实测给 funasr 一个错误同音词,能把本来认对的结果拽错——所以热词表宁缺毋滥,不要从输入法词库(充满打字碎片)整包导入。
 
 ### 7.12a 长录音 —— VAD 分段
-Fun-ASR-Nano 一次吃不下长音频。实测(不分段):30s 只出第一句(截断)、1–2 分钟大段丢失且错字增多、5 分钟推理 OOM(sidecar 返回 error,该段口述全丢)。**方案**:funasr `AutoModel(vad_model=..., vad_kwargs={"max_single_segment_time": 30000})`,先用 fsmn-vad(4MB)按停顿切成 ≤30s 的段再逐段识别——字数随时长线性增长(5 分钟 999 字)、推理峰值显存与时长无关(~3.58G)、5 分钟约 10s 转完,短句延迟不变(0.24s),热词逐段生效。funasr 用空格拼接各段,sidecar 去掉 CJK 字符/标点之间的空格(保留英文词间空格)。**局限**:一口气不停顿超过 30s 时只能硬切,切口处可能有个别字重复/遗漏。配置键 `vad`(默认 `fsmn-vad`,可填本地目录,`off` 关闭),只作用于 funasr——whisper 自带 `vad_filter`。
+Fun-ASR-Nano 一次吃不下长音频。实测(不分段):30s 只出第一句(截断)、1–2 分钟大段丢失且错字增多、5 分钟推理 OOM(sidecar 返回 error,该段口述全丢)。**方案**:funasr `AutoModel(vad_model=..., vad_kwargs={"max_single_segment_time": 30000})`,先用 fsmn-vad(4MB)按停顿切成 ≤30s 的段再逐段识别——字数随时长线性增长(5 分钟 999 字)、推理峰值显存与时长无关(~3.58G)、5 分钟约 10s 转完,短句延迟不变(0.24s),热词逐段生效。funasr 用空格拼接各段,sidecar 去掉 CJK 字符/标点之间的空格(保留英文词间空格)。另外,逐个念字母时模型会把每个字母当独立的词输出成 "H T T P",sidecar 的 `_tidy` 把连续 ≥2 个单独的大写字母/数字合并("H T T P"→"HTTP"、"E S P 3 2"→"ESP32"、"A 4"→"A4";模型会把逐个念出的字母统一输出为大写)。串里至少要有一个字母,纯数字("第 3 4 名")与单个字母("Plan B"、"选 A 还是 B")不动;所有后端统一处理。**局限**:一口气不停顿超过 30s 时只能硬切,切口处可能有个别字重复/遗漏。配置键 `vad`(默认 `fsmn-vad`,可填本地目录,`off` 关闭),只作用于 funasr——whisper 自带 `vad_filter`。
 
 **显存不会持续上涨**:连续 10 次短句转写进程显存恒定 3556MiB;长音频推理时的临时峰值用完即还(torch reserved 回落到 ~3.42G)。常驻的 ~3.5G 是模型权重 + 缓存,是"按完即出字"的代价,停服务才释放。
 
