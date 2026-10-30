@@ -58,8 +58,8 @@
  │  │     │                           → Mutter/libinput 当作真实键盘 → wl_keyboard 发给焦点窗口         │  │
  │  │     │                           → 目标应用向 selection 持有者(wl-copy) 要数据 → 文字上屏          │  │
  │  │     │                                                                                           │  │
- │  │     ├─ ⑦ 通知      fork/exec notify-send -p/-r ──D-Bus──▶ org.freedesktop.Notifications          │  │
- │  │     │              记住通知 ID 原地替换；一停录音就 CloseNotification 关掉"录音中"             │  │
+ │  │     ├─ ⑦ 通知      fork/exec notify-send -p ──D-Bus──▶ org.freedesktop.Notifications             │  │
+ │  │     │              只记"录音中"横幅的 ID，一停录音就 CloseNotification 关掉；其余自动过期     │  │
  │  │     │                                                                                           │  │
  │  │     └─ ⑧ 设置页    net/http 监听 127.0.0.1:27865（只认 loopback Host；POST 只收 JSON）           │  │
  │  │                    读写 config.toml / hotwords.txt；"保存并重启" = systemctl --user restart       │  │
@@ -127,7 +127,7 @@
 | Wayland 剪贴板（wl-copy） | 放文字 | CJK 文本无法用按键序列打出来 |
 | PipeWire（pw-record / pw-play / pactl） | 录音、提示音、列麦克风 | 系统音频服务；`--target` 可以固定到指定麦克风 |
 | AT-SPI（D-Bus 上的无障碍总线） | 判断焦点类型 | Wayland 不让查询键盘焦点，无障碍总线是唯一合法渠道 |
-| D-Bus 通知服务（notify-send `-p`/`-r`、`CloseNotification`） | 状态提示 | gnome-shell 不认 notify-osd 的"同步替换"提示，必须靠通知 ID 原地替换和主动关闭，否则常驻的"录音中"会挡住后续通知 |
+| D-Bus 通知服务（notify-send `-p`、`CloseNotification`） | 状态提示 | gnome-shell 不认 notify-osd 的"同步替换"提示，常驻的"录音中"要主动关闭，否则会挡住后续通知；**不能用 `-r` 替换已过期的通知**，会触发 gnome-shell 的 bug，所有横幅失效直到重新登录 |
 | 信号：SIGINT / SIGTERM / SIGKILL | 停止录音 / 优雅退出 / 超时强杀 | pw-record 收到 SIGINT 才会写好 WAV 头 |
 
 ---
@@ -282,6 +282,7 @@ systemctl --user stop voicetype        # 临时腾出显存
 | 显存会一直涨吗 | 不会。实测连续转写不泄漏；每次推理临时多占的显存用完就还，常驻的约 3.5G 是模型本身，停服务才释放 |
 | 念字母缩写时字母间有空格 | 已自动合并（"H T T P" → "HTTP"，字母数字混念也行："E S P 3 2" → "ESP32"）。若字母本身认错（如 H 听成 S），把这个缩写加进热词 |
 | 长段口述丢内容 | 确认 `vad` 没有设成 `off`（funasr 需要靠它分段） |
+| 所有通知都不弹了（不只 voicetype） | GNOME Shell 的通知模块出错卡住了（日志 `journalctl --user _COMM=gnome-shell` 里有 `already disposed` / `JS ERROR`），注销重新登录即可恢复。v0.2.1 起不会再由 voicetype 触发 |
 | 设置页打不开 | 守护进程没在运行，或 `web = "off"` |
 
 更深入的设计取舍与踩坑记录见 [ARCHITECTURE.md](ARCHITECTURE.md)。

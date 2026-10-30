@@ -233,8 +233,10 @@ Fun-ASR-Nano 一次吃不下长音频。实测(不分段):30s 只出第一句(�
 ### 7.13 提示音,不做动画
 按下开始/结束各播一声提示音。系统音效主题太"系统",故在 `sound.go` 里**用 Go 实时合成**(正弦音 + 钟形泛音 + 可选滑音 + 短回声,零音频文件、零依赖),预设分两组:低沉科幻的 `warp`(锯齿味音色升降"充能/断电")/`nebula`(低频 FM 金属音 + 高频闪光)/`sonar`(深沉声呐 + 远处回声),清亮的 `crystal`(玻璃钟音)/`pulse`(电子扫频)/`halo`(错落的 Cmaj7 和弦、尾音最长,刻意压低一个八度免得尾音尖)。**低沉预设的基频在 100–200Hz,但笔记本扬声器放不出 ~250Hz 以下**,所以刻意削弱基频、加重 2–8 次谐波,靠"缺失基频"效应让耳朵脑补出低音;改音色时用频谱检查 300Hz 以上能量占比(目标 ≥40%),否则在笔记本上会又小又闷;开始上行、结束下行,首次使用时渲染到 `$XDG_RUNTIME_DIR` 再用 `pw-play` 播。**开始音先播 250ms(响的主体)才启动 `pw-record`**,免得被麦克风录进去,弱尾音与录音重叠无碍;结束音在录音停止后异步播。设置页可试听,切换即时生效(daemon 的 `sound` 字段,不需重启)。**不做录音动画**:Wayland 下普通程序无法在其他窗口之上绘制悬浮层,只能写 GNOME Shell 扩展(多一套代码);而 GNOME 录音时顶栏自带麦克风指示,加上"🎤 录音中"通知已足够。
 
-### 7.14 通知 —— 靠 ID 原地替换,停录音即关闭
-gnome-shell(50.x)**不认** notify-osd 的 `x-canonical-private-synchronous` 提示,每次 `notify-send` 都会新开一条;而"🎤 录音中"是常驻的,后续通知只能排在它后面,表现为"字都上屏了提示还挂着"。**方案**(`notify.go`):所有通知共用一个槽位——`notify-send -p` 记下 ID,下一条用 `-r <ID>` 原地替换;按下停止的瞬间同步调用 D-Bus `CloseNotification` 关掉录音提示(约 20ms,同步执行以免晚于后续报错通知把它误关);成功不再弹"✅"(文字上屏 + 结束音即反馈);全部标为 transient(`-e`),不进通知中心。
+### 7.14 通知 —— 只有一条常驻横幅,停录音即关闭,永不替换
+gnome-shell(50.x)**不认** notify-osd 的 `x-canonical-private-synchronous` 提示,每次 `notify-send` 都会新开一条;而"🎤 录音中"是常驻的,后续通知只能排在它后面,表现为"字都上屏了提示还挂着"。**方案**(`notify.go`):唯一常驻的通知是录音横幅,`notify-send -p` 记下它的 ID,按下停止的瞬间同步调用 D-Bus `CloseNotification` 关掉(约 20ms,同步执行以免晚于后续报错通知);其余通知一律新开、自动过期;成功不弹通知(文字上屏 + 结束音即反馈);全部标为 transient(`-e`),不进通知中心。
+
+**踩过的坑:不要用 `-r` 替换可能已不存在的通知。**早一版让所有通知共用一个槽位、用 `-r <ID>` 原地替换。transient 通知被关闭或过期后,gnome-shell 会把它连同所属 source 一起销毁;再用 `-r` 替换这个 ID,会走进 gnome-shell 的 bug:日志先报 `Notification ... has been already disposed`,接着 `JS ERROR: can't access property "urgency", this._notification is null`(messageTray.js `_updateState`),之后**所有应用的横幅都不再显示**,Wayland 下只能重新登录恢复。实测触发路径:服务启动发"已就绪"(4s 过期)→ 下一次按热键用 `-r` 替换它。现在只对确定还开着的录音横幅调用关闭,关完立即清空 ID,不再有任何替换。
 
 ### 7.15 wl-copy 不能接管道
 `wl-copy` 会 fork 一个后台子进程持有剪贴板内容,它继承父进程的 stdout/stderr。若用 `CombinedOutput` 之类把输出接成管道,`Wait` 要等管道关闭——也就是等**别的程序接管剪贴板**才返回。GPaste 只记录不接管,于是粘贴键迟迟发不出,等你下次复制别的东西时才补发到不知哪个窗口。**方案**:stdout 丢弃、stderr 直接给 daemon 自己的 fd(journal),`Run` 在父 wl-copy 退出时即返回。
